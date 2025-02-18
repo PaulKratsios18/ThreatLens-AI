@@ -1,0 +1,22 @@
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+.leaflet-popup-content {
+  margin: 8px;
+  min-width: 200px;
+}
+
+.leaflet-popup-content h3 {
+  margin-bottom: 8px;
+}
+
+.map-container {
+  position: relative;
+  width: 100%;
+  height: 600px;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}

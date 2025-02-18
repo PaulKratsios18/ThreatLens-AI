@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional
+from datetime import datetime
 
 class GTDDataLoader:
     def __init__(self):
@@ -8,26 +9,74 @@ class GTDDataLoader:
         
     def load_data(self, path: str) -> pd.DataFrame:
         """Load and preprocess GTD data"""
-        self.data = pd.read_csv(path)
+        # Specify dtypes for problematic columns
+        dtype_dict = {
+            'iyear': 'Int64',
+            'imonth': 'Int64',
+            'iday': 'Int64',
+            'region': 'Int64',
+            'vicinity': 'Int64',
+            'success': 'Int64',
+            'suicide': 'Int64',
+            'multiple': 'Int64',
+            'nperps': 'float64',
+            'nperpcap': 'float64'
+        }
+        
+        # Load with specified dtypes and low_memory=False
+        self.data = pd.read_csv(path, dtype=dtype_dict, low_memory=False)
+        
+        # Clean data after loading
         self._clean_data()
         return self.data
     
     def _clean_data(self):
         """Clean and preprocess GTD data"""
-        # Convert date columns
-        date_cols = ['iyear', 'imonth', 'iday']
-        self.data['date'] = pd.to_datetime(
-            self.data[date_cols].assign(
-                iday=self.data.iday.fillna(1)
-            )
-        )
+        # Handle date columns first
+        self.data['iyear'] = pd.to_numeric(self.data['iyear'], errors='coerce')
+        self.data['imonth'] = pd.to_numeric(self.data['imonth'], errors='coerce').fillna(1)
+        self.data['iday'] = pd.to_numeric(self.data['iday'], errors='coerce').fillna(1)
         
-        # Clean numeric columns
-        numeric_cols = ['nkill', 'nwound']
+        # Create date string with validation
+        self.data['date'] = pd.to_datetime({
+            'year': self.data['iyear'],
+            'month': self.data['imonth'].clip(1, 12),  # Ensure valid months
+            'day': self.data['iday'].clip(1, 31)  # Ensure valid days
+        }, errors='coerce')
+        
+        # Handle missing values
+        numeric_cols = ['nkill', 'nwound', 'nperps', 'nperpcap']
         self.data[numeric_cols] = self.data[numeric_cols].fillna(0)
         
-        # Clean categorical columns
-        self.data['gname'] = self.data['gname'].fillna('Unknown')
+        # Clean categorical columns with sensible defaults
+        categorical_cols = ['gname', 'country_txt', 'region_txt', 'attacktype1_txt', 
+                          'targtype1_txt', 'weaptype1_txt']
+        for col in categorical_cols:
+            self.data[col] = self.data[col].fillna('Unknown')
+        
+        # Clean location data
+        self.data['latitude'] = pd.to_numeric(self.data['latitude'], errors='coerce')
+        self.data['longitude'] = pd.to_numeric(self.data['longitude'], errors='coerce')
+        
+        # Convert boolean columns
+        bool_cols = ['success', 'suicide', 'multiple']
+        for col in bool_cols:
+            self.data[col] = self.data[col].fillna(0).astype(int)
+        
+        # Remove entries with critical missing data
+        self.data = self.data.dropna(subset=['date', 'country_txt', 'region_txt'])
+        
+        # Standardize numeric values
+        for col in numeric_cols:
+            self.data[col] = pd.to_numeric(self.data[col], errors='coerce').fillna(0)
+            
+        # Clean property damage values
+        self.data['property'] = self.data['property'].fillna(0).astype(int)
+        
+        # Handle extended text fields
+        text_cols = ['summary', 'motive']
+        for col in text_cols:
+            self.data[col] = self.data[col].fillna('').str.strip()
         
     def get_attacks_by_region(self) -> pd.DataFrame:
         """Get attack counts by region"""
