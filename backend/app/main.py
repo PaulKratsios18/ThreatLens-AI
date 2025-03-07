@@ -7,6 +7,7 @@ import pandas as pd
 from datetime import datetime
 import json
 from pathlib import Path
+import random
 
 from data_processing.data_loader import GTDDataLoader
 from data_processing.data_preprocessor import GTDPreprocessor
@@ -15,6 +16,15 @@ from models.neural_network import TerrorismPredictor
 from models.xai_explainer import AttackExplainer
 
 app = FastAPI()
+
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Be more specific than "*"
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Initialize components
 data_loader = GTDDataLoader()
@@ -31,15 +41,6 @@ X_train, _, y_train, _ = preprocessor.preprocess(data_with_features)
 model = TerrorismPredictor()
 model.load("models/trained_model.keras")
 explainer = AttackExplainer(model, preprocessor.feature_names, X_train[:1000])  # Use first 1000 samples
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 class PredictionRequest(BaseModel):
     features: Dict[str, float]
@@ -134,5 +135,83 @@ async def get_static_predictions():
         with open(predictions_path, 'r') as f:
             predictions = json.load(f)
         return predictions
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/historical-data")
+async def get_historical_data(year: int = 2020):
+    try:
+        # For this example, we'll generate mock data
+        # In a real application, you would load this from your database or files
+        
+        # Regions match those in your frontend
+        regions = [
+            "North America", "South America", "Western Europe", 
+            "Eastern Europe", "Middle East", "North Africa",
+            "Sub-Saharan Africa", "Central Asia", "South Asia", 
+            "East Asia", "Southeast Asia", "Oceania"
+        ]
+        
+        attack_types = [
+            "Bombing/Explosion", "Armed Assault", "Assassination",
+            "Hostage Taking", "Infrastructure Attack", "Unarmed Assault"
+        ]
+        
+        weapon_types = [
+            "Explosives", "Firearms", "Melee", "Vehicle", "Chemical", "Other"
+        ]
+        
+        target_types = [
+            "Civilian", "Government", "Military", "Infrastructure", "Religious", "Educational"
+        ]
+        
+        # Generate some sample data
+        historical_data = []
+        
+        # Different number of incidents based on year to show trends
+        num_incidents = {
+            2018: 250,
+            2019: 280,
+            2020: 300,
+            2021: 270,
+            2022: 290
+        }.get(year, 300)
+        
+        for i in range(num_incidents):
+            region = random.choice(regions)
+            
+            # Set coordinates based on region
+            if region == "North America":
+                lat, lng = 40 + random.uniform(-15, 15), -100 + random.uniform(-25, 25)
+                country = random.choice(["United States", "Canada", "Mexico"])
+            elif region == "South America":
+                lat, lng = -15 + random.uniform(-15, 15), -60 + random.uniform(-15, 15)
+                country = random.choice(["Brazil", "Argentina", "Colombia", "Peru"])
+            # ... add coordinates for other regions similarly
+            
+            # Default if region not matched
+            else:
+                lat, lng = random.uniform(-50, 50), random.uniform(-180, 180)
+                country = "Unknown"
+                
+            historical_data.append({
+                "id": i,
+                "year": year,
+                "month": random.randint(1, 12),
+                "day": random.randint(1, 28),
+                "region": region,
+                "country": country,
+                "city": f"City {i}",
+                "latitude": lat,
+                "longitude": lng,
+                "attack_type": random.choice(attack_types),
+                "weapon_type": random.choice(weapon_types),
+                "target_type": random.choice(target_types),
+                "num_killed": max(0, int(random.expovariate(0.5))),
+                "num_wounded": max(0, int(random.expovariate(0.3)))
+            })
+            
+        return historical_data
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
