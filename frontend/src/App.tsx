@@ -1,8 +1,12 @@
 import React from 'react';
-import PredictionDashboard from './components/PredictionDashboard';
+import DashboardTabs from './components/DashboardTabs';
 
-const App = () => {
-  return <PredictionDashboard />;
-};
+function App() {
+  return (
+    <div className="App">
+      <DashboardTabs />
+    </div>
+  );
+}
 
 export default App; 
