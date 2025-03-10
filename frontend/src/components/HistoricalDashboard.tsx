@@ -3,32 +3,19 @@ import { Bar, Pie, Line } from 'react-chartjs-2';
 import { Chart, registerables } from 'chart.js';
 import HistoricalMap from './HistoricalMap';
 import TimelineSlider from './TimelineSlider';
+import AttacksTable from './AttacksTable';
+import { HistoricalAttack } from '../utils/countryUtils';
+import CountrySelector from './CountrySelector';
 
 Chart.register(...registerables);
-
-interface HistoricalAttack {
-  id: number;
-  year: number;
-  month: number;
-  day: number;
-  region: string;
-  country: string;
-  city: string;
-  latitude: number;
-  longitude: number;
-  attack_type: string;
-  weapon_type: string;
-  target_type: string;
-  num_killed: number;
-  num_wounded: number;
-}
 
 const HistoricalDashboard: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedYear, setSelectedYear] = useState<number>(2020);
+  const [selectedYear, setSelectedYear] = useState<number>(2019);
   const [historicalData, setHistoricalData] = useState<HistoricalAttack[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'regions' | 'trends'>('overview');
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchHistoricalData = async () => {
@@ -42,7 +29,7 @@ const HistoricalDashboard: React.FC = () => {
         }
         
         const data = await response.json();
-        setHistoricalData(data);
+        setHistoricalData(data.incidents);
       } catch (error) {
         console.error('Error fetching historical data:', error);
         setError(error instanceof Error ? error.message : 'Failed to load historical data');
@@ -129,7 +116,7 @@ const HistoricalDashboard: React.FC = () => {
       <div className="mb-6">
         <div className="mb-4">
           <TimelineSlider
-            years={[2018, 2019, 2020, 2021, 2022]}
+            years={[2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022]}
             selectedYear={selectedYear}
             onChange={setSelectedYear}
           />
@@ -182,19 +169,42 @@ const HistoricalDashboard: React.FC = () => {
             <Pie data={typeChartData} />
           </div>
           <div className="col-span-1 lg:col-span-2 bg-white p-4 rounded-lg shadow">
-            <h3 className="text-xl font-semibold mb-4">Historical Incidents Map ({selectedYear})</h3>
-            <HistoricalMap incidents={historicalData} />
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold">Historical Incidents Map ({selectedYear})</h3>
+              {selectedCountry && (
+                <button 
+                  className="text-sm text-blue-600 hover:text-blue-800"
+                  onClick={() => setSelectedCountry(null)}
+                >
+                  Clear Selection
+                </button>
+              )}
+            </div>
+            <HistoricalMap 
+              incidents={historicalData} 
+              selectedCountry={selectedCountry}
+            />
+          </div>
+          <div className="lg:col-span-2">
+            <AttacksTable incidents={historicalData} />
           </div>
         </div>
       )}
 
       {activeTab === 'regions' && (
-        <div className="grid grid-cols-1 gap-6">
-          <div className="bg-white p-4 rounded-lg shadow">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 bg-white p-4 rounded-lg shadow">
             <h3 className="text-xl font-semibold mb-4">Attacks by Region ({selectedYear})</h3>
             <Bar data={regionChartData} options={{ indexAxis: 'y' }} />
           </div>
-          {/* Add more regional visualizations here */}
+          <div>
+            <CountrySelector
+              incidents={historicalData}
+              selectedCountry={selectedCountry}
+              onChange={setSelectedCountry}
+            />
+          </div>
+          {/* Modify if needed */}
         </div>
       )}
 

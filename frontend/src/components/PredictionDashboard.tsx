@@ -1,23 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import PredictionMap from './PredictionMap';
 import RegionDetails from './RegionDetails';
+import CountryDetails from './CountryDetails';
 import TimelineSlider from './TimelineSlider';
 import StatisticsPanel from './StatisticsPanel';
 import { Prediction } from '../types/predictions';
 
 interface ApiPrediction {
-  year: number;
+  country: string;
   region: string;
-  region_name: string;
   expected_attacks: number;
   confidence_score: number;
   risk_level: string;
+  gti_score: number;
+  rank: number;
+  change_from_previous: number;
   attack_types: Record<string, number>;
+  primary_groups: string[];
 }
 
 const PredictionDashboard: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState(2023);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,33 +40,19 @@ const PredictionDashboard: React.FC = () => {
         
         // Transform the predictions for the selected year
         const yearPredictions = data.predictions[selectedYear.toString()] || [];
-        const transformedPredictions: Prediction[] = yearPredictions.map((pred: ApiPrediction) => {
-          // Calculate risk based on both confidence and expected attacks
-          const attackSeverity = pred.expected_attacks > 150 ? 'high' : 
-                                pred.expected_attacks > 100 ? 'medium' : 'low';
-          
-          const confidenceSeverity = pred.confidence_score > 0.75 ? 'high' : 
-                                    pred.confidence_score > 0.35 ? 'medium' : 'low';
-          
-          // Combined risk assessment
-          let risk_level: 'High' | 'Medium' | 'Low';
-          if (attackSeverity === 'high' && confidenceSeverity !== 'low') {
-            risk_level = 'High';
-          } else if (attackSeverity === 'low' && confidenceSeverity === 'low') {
-            risk_level = 'Low';
-          } else {
-            risk_level = 'Medium';
-          }
-
-          return {
-            year: selectedYear,
-            region_name: pred.region,
-            expected_attacks: pred.expected_attacks,
-            confidence_score: pred.confidence_score,
-            risk_level,
-            attack_types: pred.attack_types
-          };
-        });
+        const transformedPredictions: Prediction[] = yearPredictions.map((pred: ApiPrediction) => ({
+          year: selectedYear,
+          country: pred.country,
+          region_name: pred.region,
+          expected_attacks: pred.expected_attacks,
+          confidence_score: pred.confidence_score,
+          risk_level: pred.risk_level as 'High' | 'Medium' | 'Low',
+          gti_score: pred.gti_score,
+          rank: pred.rank,
+          change_from_previous: pred.change_from_previous,
+          attack_types: pred.attack_types,
+          primary_groups: pred.primary_groups
+        }));
 
         setPredictions(transformedPredictions);
       } catch (error) {
@@ -74,6 +65,17 @@ const PredictionDashboard: React.FC = () => {
 
     fetchPredictions();
   }, [selectedYear]);
+
+  // Function to handle country selection
+  const handleCountryClick = (country: string) => {
+    setSelectedCountry(country);
+    
+    // Find the region for this country
+    const prediction = predictions.find(p => p.country === country);
+    if (prediction) {
+      setSelectedRegion(prediction.region_name);
+    }
+  };
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
@@ -101,6 +103,7 @@ const PredictionDashboard: React.FC = () => {
             predictions={predictions}
             selectedYear={selectedYear}
             onRegionClick={setSelectedRegion}
+            onCountryClick={handleCountryClick}
           />
           <TimelineSlider
             years={[2023, 2024, 2025]}
@@ -111,7 +114,16 @@ const PredictionDashboard: React.FC = () => {
         
         <div>
           <StatisticsPanel predictions={predictions} selectedYear={selectedYear} />
-          {selectedRegion && (
+          
+          {selectedCountry && (
+            <CountryDetails
+              country={selectedCountry}
+              predictions={predictions}
+              year={selectedYear}
+            />
+          )}
+          
+          {selectedRegion && !selectedCountry && (
             <RegionDetails
               region={selectedRegion}
               predictions={predictions}

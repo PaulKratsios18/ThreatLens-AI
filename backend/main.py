@@ -2,6 +2,20 @@ from data_processing.data_loader import GTDDataLoader
 from data_processing.data_preprocessor import GTDPreprocessor
 from data_processing.feature_engineering import GTDFeatureEngineer
 import pandas as pd
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+
+app = FastAPI()
+
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def main():
     # Initialize components
@@ -36,5 +50,62 @@ def main():
     pd.DataFrame(y_train).to_csv('processed_data/y_train.csv', index=False)
     pd.DataFrame(y_test).to_csv('processed_data/y_test.csv', index=False)
 
+# Add your route handlers here
+@app.get("/static-predictions")
+async def get_static_predictions():
+    # Return mock data for now
+    return {
+        "predictions": {
+            "2023": [
+                {
+                    "region": "Middle East & North Africa",
+                    "expected_attacks": 180,
+                    "confidence_score": 0.85,
+                    "attack_types": {
+                        "Bombing/Explosion": 60,
+                        "Armed Assault": 40,
+                        "Hostage Taking": 10,
+                        "Other": 15
+                    }
+                },
+                {
+                    "region": "South Asia",
+                    "expected_attacks": 150,
+                    "confidence_score": 0.78,
+                    "attack_types": {
+                        "Bombing/Explosion": 55,
+                        "Armed Assault": 35,
+                        "Assassination": 15,
+                        "Other": 10
+                    }
+                }
+            ]
+        }
+    }
+
+@app.get("/historical-data")
+async def get_historical_data(year: int = 2020):
+    # Return mock data for now
+    return {
+        "incidents": [
+            {
+                "id": 1,
+                "year": year,
+                "month": 1,
+                "day": 15,
+                "region": "Middle East & North Africa",
+                "country": "Iraq",
+                "city": "Baghdad",
+                "latitude": 33.3152,
+                "longitude": 44.3661,
+                "attack_type": "Bombing/Explosion",
+                "weapon_type": "Explosives",
+                "target_type": "Government",
+                "num_killed": 5,
+                "num_wounded": 12
+            }
+        ]
+    }
+
 if __name__ == "__main__":
-    main() 
+    uvicorn.run(app, host="0.0.0.0", port=8000) 
