@@ -32,25 +32,47 @@ data_loader = GTDDataLoader()
 preprocessor = GTDPreprocessor()
 feature_engineer = GTDFeatureEngineer()
 
-# Load and process a small sample of data for the explainer
-print("Loading sample data for explainer...")
-data = data_loader.load_data("../data/globalterrorismdb_0522dist.csv")
-data_with_features = feature_engineer.engineer_features(data)
-X_train, _, y_train, _ = preprocessor.preprocess(data_with_features)
+# Global flag to prevent loading the full dataset more than once
+full_dataset_loaded = False
 
-# Initialize model and explainer
-model = TerrorismPredictor()
-model.load("models/trained_model.keras")
-explainer = AttackExplainer(model, preprocessor.feature_names, X_train[:1000])  # Use first 1000 samples
+# Instead of loading full dataset on startup, load only when necessary for models
+# This allows the API to start faster and only load what it needs
+def load_model_data_if_needed():
+    global full_dataset_loaded
+    if not full_dataset_loaded:
+        print("Loading sample data for explainer on first request...")
+        data = data_loader.load_data("../data/globalterrorismdb_0522dist.csv", use_cache=True)
+        data_with_features = feature_engineer.engineer_features(data)
+        X_train, _, y_train, _ = preprocessor.preprocess(data_with_features)
+        
+        # Initialize model and explainer
+        model = TerrorismPredictor()
+        model.load("models/trained_model.keras")
+        explainer = AttackExplainer(model, preprocessor.feature_names, X_train[:1000])  # Use first 1000 samples
+        
+        # Store in global namespace
+        global X_TRAIN, MODEL, EXPLAINER
+        X_TRAIN = X_train
+        MODEL = model
+        EXPLAINER = explainer
+        
+        full_dataset_loaded = True
+
+# Create model and explainer instances but don't load data yet
+model = None
+explainer = None
 
 class PredictionRequest(BaseModel):
     features: Dict[str, float]
 
 @app.post("/predict")
 async def predict_attack(request: PredictionRequest):
+    # Load data if not already loaded
+    load_model_data_if_needed()
+    
     try:
         features = np.array(list(request.features.values())).reshape(1, -1)
-        prediction = model.predict(features)[0]
+        prediction = MODEL.predict(features)[0]
         
         return {
             "success_probability": float(prediction),
@@ -61,32 +83,41 @@ async def predict_attack(request: PredictionRequest):
 
 @app.get("/feature-importance")
 async def get_feature_importance():
+    # Load data if not already loaded
+    load_model_data_if_needed()
+    
     return {
-        "feature_importance": model.get_feature_importance(),
+        "feature_importance": MODEL.get_feature_importance(),
         "feature_names": preprocessor.feature_names
     }
 
 @app.post("/explain")
 async def explain_prediction(request: PredictionRequest):
+    # Load data if not already loaded
+    load_model_data_if_needed()
+    
     try:
         features = np.array(list(request.features.values())).reshape(1, -1)
-        explanation = explainer.explain_prediction(features[0])
-        prediction = float(model.predict(features)[0])
+        explanation = EXPLAINER.explain_prediction(features[0])
+        prediction = float(MODEL.predict(features)[0])
         
         # Get key factors analysis
-        key_factors = explainer.analyze_key_factors(explanation)
+        key_factors = EXPLAINER.analyze_key_factors(explanation)
         
         return {
-            "success_probability": prediction,
-            "risk_level": "High" if prediction > 0.8 else "Medium" if prediction > 0.4 else "Low",
-            "explanations": explanation,
+            "prediction": prediction,
+            "feature_importance": list(explanation),
+            "feature_names": preprocessor.feature_names,
             "key_factors": key_factors
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/predict-attacks")
 async def predict_future_attacks(request: PredictionRequest):
+    # Load data if not already loaded
+    load_model_data_if_needed()
+    
     try:
         features = np.array(list(request.features.values())).reshape(1, -1)
         
@@ -104,11 +135,14 @@ async def predict_future_attacks(request: PredictionRequest):
 
 @app.post("/predict-location")
 async def predict_attack_location(request: PredictionRequest):
+    # Load data if not already loaded
+    load_model_data_if_needed()
+    
     try:
         features = np.array(list(request.features.values())).reshape(1, -1)
         
         # Get location cluster predictions
-        location_probs = model.predict(features)[0]
+        location_probs = MODEL.predict(features)[0]
         
         # Get top 3 most likely regions
         top_regions = []
@@ -422,16 +456,19 @@ async def get_static_predictions():
     }
 
 @app.get("/historical-data")
-async def get_historical_data(year: int = 2020):
+async def get_historical_data(year: int = 2021):
     """
     Get historical terrorism data for a specific year from the Global Terrorism Database.
     Uses two different dataset files: one for 1970-2020 data and another for 2021 data.
     """
     try:
         # Implement simple in-memory cache
-        # This cache is reset when the server restarts
+        # This cache persists as long as the server is running
+        if not hasattr(get_historical_data, "cache"):
+            get_historical_data.cache = {}
+        
         cache_key = f"historical_data_{year}"
-        if hasattr(get_historical_data, "cache") and cache_key in get_historical_data.cache:
+        if cache_key in get_historical_data.cache:
             return get_historical_data.cache[cache_key]
             
         # Select the appropriate file based on the year
@@ -451,47 +488,113 @@ async def get_historical_data(year: int = 2020):
             'targtype1_txt', 'weaptype1_txt', 'nkill', 'nwound', 'gname'
         ]
         
-        # Use chunksize to process large files more efficiently
-        chunk_size = 10000
+        # Set appropriate dtype for faster reading and to avoid warnings
+        dtype_dict = {
+            'iyear': 'Int64', 
+            'imonth': 'Int64', 
+            'iday': 'Int64',
+            'eventid': str,
+            'country_txt': str,
+            'region_txt': str,
+            'city': str,
+            'attacktype1_txt': str,
+            'targtype1_txt': str,
+            'weaptype1_txt': str,
+            'gname': str
+        }
+        
+        # Optimized approach: Read only necessary data using query_string with pandas
+        # First, build the index we need for optimized reading
+        if not hasattr(get_historical_data, "file_index"):
+            get_historical_data.file_index = {}
+        
+        if str(gtd_file_path) not in get_historical_data.file_index:
+            # Only read the year column to create an index (much faster)
+            index_df = pd.read_csv(
+                gtd_file_path,
+                usecols=['iyear'],
+                dtype={'iyear': 'Int64'},
+                header=0
+            )
+            # Create a dictionary of year -> row indices
+            year_indices = {}
+            for idx, y in enumerate(index_df['iyear']):
+                if y not in year_indices:
+                    year_indices[y] = []
+                year_indices[y].append(idx)
+            
+            get_historical_data.file_index[str(gtd_file_path)] = year_indices
+            print(f"Created index for {gtd_file_path} with {len(year_indices)} years")
+        
+        # Get the row indices for this year
+        year_indices = get_historical_data.file_index[str(gtd_file_path)].get(year, [])
+        
+        if not year_indices:
+            # If no data for this year, return empty response
+            response = {"incidents": []}
+            get_historical_data.cache[cache_key] = response
+            return response
+        
+        # Read only the rows we need using the skiprows parameter
+        # We need to skip all rows except the header (row 0) and the rows with our year
+        all_rows = set(range(1, sum(len(indices) for indices in get_historical_data.file_index[str(gtd_file_path)].values()) + 1))
+        rows_to_keep = set(year_indices)
+        rows_to_skip = list(all_rows - rows_to_keep - {0})  # Keep header (0) and our year's rows
+        
+        # Read data more efficiently
+        try:
+            df = pd.read_csv(
+                gtd_file_path,
+                usecols=essential_columns,
+                dtype=dtype_dict,
+                skiprows=rows_to_skip if rows_to_skip else None,
+                header=0,
+                low_memory=False
+            )
+        except Exception as e:
+            print(f"Error with optimized loading: {e}")
+            # Fallback to standard loading if optimization fails
+            df = pd.read_csv(
+                gtd_file_path,
+                usecols=essential_columns,
+                dtype=dtype_dict,
+                header=0,
+                low_memory=False
+            )
+            df = df[df['iyear'] == year]
+        
         incidents = []
         
-        # Process data in chunks to reduce memory usage
-        for chunk in pd.read_csv(gtd_file_path, usecols=essential_columns, chunksize=chunk_size, low_memory=False):
-            # Filter to the specified year
-            year_chunk = chunk[chunk['iyear'] == year].copy()
+        # Process the data
+        for _, row in df.iterrows():
+            # Handle missing values
+            latitude = row['latitude'] if not pd.isna(row['latitude']) else 0
+            longitude = row['longitude'] if not pd.isna(row['longitude']) else 0
+            num_killed = row['nkill'] if not pd.isna(row['nkill']) else 0
+            num_wounded = row['nwound'] if not pd.isna(row['nwound']) else 0
             
-            if not year_chunk.empty:
-                for idx, row in year_chunk.iterrows():
-                    # Handle missing values
-                    latitude = row['latitude'] if not pd.isna(row['latitude']) else 0
-                    longitude = row['longitude'] if not pd.isna(row['longitude']) else 0
-                    num_killed = row['nkill'] if not pd.isna(row['nkill']) else 0
-                    num_wounded = row['nwound'] if not pd.isna(row['nwound']) else 0
-                    
-                    incidents.append({
-                        "id": int(row['eventid']),
-                        "year": int(row['iyear']),
-                        "month": int(row['imonth']) if not pd.isna(row['imonth']) else 0,
-                        "day": int(row['iday']) if not pd.isna(row['iday']) else 0,
-                        "region": row['region_txt'],
-                        "country": row['country_txt'],
-                        "city": row['city'] if not pd.isna(row['city']) else "",
-                        "latitude": float(latitude),
-                        "longitude": float(longitude),
-                        "attack_type": row['attacktype1_txt'] if not pd.isna(row['attacktype1_txt']) else "Unknown",
-                        "weapon_type": row['weaptype1_txt'] if not pd.isna(row['weaptype1_txt']) else "Unknown",
-                        "target_type": row['targtype1_txt'] if not pd.isna(row['targtype1_txt']) else "Unknown",
-                        "num_killed": int(num_killed),
-                        "num_wounded": int(num_wounded),
-                        "group_name": row['gname'] if not pd.isna(row['gname']) else "Unknown"
-                    })
+            incidents.append({
+                "id": row['eventid'],
+                "year": int(row['iyear']),
+                "month": int(row['imonth']) if not pd.isna(row['imonth']) else 0,
+                "day": int(row['iday']) if not pd.isna(row['iday']) else 0,
+                "region": row['region_txt'],
+                "country": row['country_txt'],
+                "city": row['city'] if not pd.isna(row['city']) else "",
+                "latitude": float(latitude),
+                "longitude": float(longitude),
+                "attack_type": row['attacktype1_txt'] if not pd.isna(row['attacktype1_txt']) else "Unknown",
+                "weapon_type": row['weaptype1_txt'] if not pd.isna(row['weaptype1_txt']) else "Unknown",
+                "target_type": row['targtype1_txt'] if not pd.isna(row['targtype1_txt']) else "Unknown",
+                "num_killed": int(num_killed),
+                "num_wounded": int(num_wounded),
+                "group_name": row['gname'] if not pd.isna(row['gname']) else "Unknown"
+            })
         
         # Create response
         response = {"incidents": incidents}
         
         # Store in cache
-        if not hasattr(get_historical_data, "cache"):
-            get_historical_data.cache = {}
         get_historical_data.cache[cache_key] = response
         
         return response
@@ -499,6 +602,8 @@ async def get_historical_data(year: int = 2020):
     except Exception as e:
         # Log the error for debugging
         print(f"Error getting historical data: {str(e)}")
+        import traceback
+        traceback.print_exc()
         # Return an empty response with error details
         return {
             "error": str(e),
