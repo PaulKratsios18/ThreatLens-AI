@@ -30,7 +30,7 @@ export const countryNameMapping: Record<string, string> = {
   'Argentina': 'Argentina',
   
   // Western Europe
-  'United Kingdom': 'United Kingdom',
+  'United Kingdom': 'England',
   'Ireland': 'Ireland',
   'France': 'France',
   'Spain': 'Spain',

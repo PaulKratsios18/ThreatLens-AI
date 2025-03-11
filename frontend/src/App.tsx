@@ -1,10 +1,13 @@
 import React from 'react';
 import DashboardTabs from './components/DashboardTabs';
+import { HistoricalDataProvider } from './contexts/HistoricalDataContext';
 
 function App() {
   return (
     <div className="App">
-      <DashboardTabs />
+      <HistoricalDataProvider>
+        <DashboardTabs />
+      </HistoricalDataProvider>
     </div>
   );
 }

@@ -425,10 +425,20 @@ async def get_static_predictions():
 async def get_historical_data(year: int = 2020):
     """
     Get historical terrorism data for a specific year from the Global Terrorism Database.
+    Uses two different dataset files: one for 1970-2020 data and another for 2021 data.
     """
     try:
-        # Read from the actual GTD dataset
-        gtd_file_path = Path(__file__).parent.parent.parent / 'data' / 'globalterrorismdb_0522dist.csv'
+        # Implement simple in-memory cache
+        # This cache is reset when the server restarts
+        cache_key = f"historical_data_{year}"
+        if hasattr(get_historical_data, "cache") and cache_key in get_historical_data.cache:
+            return get_historical_data.cache[cache_key]
+            
+        # Select the appropriate file based on the year
+        if year == 2021:
+            gtd_file_path = Path(__file__).parent.parent.parent / 'data' / 'globalterrorismdb_2021Jan-June_1222dist.csv'
+        else:
+            gtd_file_path = Path(__file__).parent.parent.parent / 'data' / 'globalterrorismdb_0522dist.csv'
         
         # Check if file exists
         if not gtd_file_path.exists():
@@ -441,39 +451,50 @@ async def get_historical_data(year: int = 2020):
             'targtype1_txt', 'weaptype1_txt', 'nkill', 'nwound', 'gname'
         ]
         
-        # Read the data for the specified year only
-        df = pd.read_csv(gtd_file_path, usecols=essential_columns, low_memory=False)
-        df = df[df['iyear'] == year].copy()
-        
-        # Create standardized response
+        # Use chunksize to process large files more efficiently
+        chunk_size = 10000
         incidents = []
         
-        for idx, row in df.iterrows():
-            # Handle missing values
-            latitude = row['latitude'] if not pd.isna(row['latitude']) else 0
-            longitude = row['longitude'] if not pd.isna(row['longitude']) else 0
-            num_killed = row['nkill'] if not pd.isna(row['nkill']) else 0
-            num_wounded = row['nwound'] if not pd.isna(row['nwound']) else 0
+        # Process data in chunks to reduce memory usage
+        for chunk in pd.read_csv(gtd_file_path, usecols=essential_columns, chunksize=chunk_size, low_memory=False):
+            # Filter to the specified year
+            year_chunk = chunk[chunk['iyear'] == year].copy()
             
-            incidents.append({
-                "id": int(row['eventid']),
-                "year": int(row['iyear']),
-                "month": int(row['imonth']) if not pd.isna(row['imonth']) else 0,
-                "day": int(row['iday']) if not pd.isna(row['iday']) else 0,
-                "region": row['region_txt'],
-                "country": row['country_txt'],
-                "city": row['city'] if not pd.isna(row['city']) else "",
-                "latitude": float(latitude),
-                "longitude": float(longitude),
-                "attack_type": row['attacktype1_txt'] if not pd.isna(row['attacktype1_txt']) else "Unknown",
-                "weapon_type": row['weaptype1_txt'] if not pd.isna(row['weaptype1_txt']) else "Unknown",
-                "target_type": row['targtype1_txt'] if not pd.isna(row['targtype1_txt']) else "Unknown",
-                "num_killed": int(num_killed),
-                "num_wounded": int(num_wounded),
-                "group_name": row['gname'] if not pd.isna(row['gname']) else "Unknown"
-            })
+            if not year_chunk.empty:
+                for idx, row in year_chunk.iterrows():
+                    # Handle missing values
+                    latitude = row['latitude'] if not pd.isna(row['latitude']) else 0
+                    longitude = row['longitude'] if not pd.isna(row['longitude']) else 0
+                    num_killed = row['nkill'] if not pd.isna(row['nkill']) else 0
+                    num_wounded = row['nwound'] if not pd.isna(row['nwound']) else 0
+                    
+                    incidents.append({
+                        "id": int(row['eventid']),
+                        "year": int(row['iyear']),
+                        "month": int(row['imonth']) if not pd.isna(row['imonth']) else 0,
+                        "day": int(row['iday']) if not pd.isna(row['iday']) else 0,
+                        "region": row['region_txt'],
+                        "country": row['country_txt'],
+                        "city": row['city'] if not pd.isna(row['city']) else "",
+                        "latitude": float(latitude),
+                        "longitude": float(longitude),
+                        "attack_type": row['attacktype1_txt'] if not pd.isna(row['attacktype1_txt']) else "Unknown",
+                        "weapon_type": row['weaptype1_txt'] if not pd.isna(row['weaptype1_txt']) else "Unknown",
+                        "target_type": row['targtype1_txt'] if not pd.isna(row['targtype1_txt']) else "Unknown",
+                        "num_killed": int(num_killed),
+                        "num_wounded": int(num_wounded),
+                        "group_name": row['gname'] if not pd.isna(row['gname']) else "Unknown"
+                    })
         
-        return {"incidents": incidents}
+        # Create response
+        response = {"incidents": incidents}
+        
+        # Store in cache
+        if not hasattr(get_historical_data, "cache"):
+            get_historical_data.cache = {}
+        get_historical_data.cache[cache_key] = response
+        
+        return response
     
     except Exception as e:
         # Log the error for debugging

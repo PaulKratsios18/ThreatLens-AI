@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, GeoJSON, Tooltip } from 'react-leaflet';
+import React, { useState, useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, GeoJSON, Tooltip, useMap } from 'react-leaflet';
+import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import '../utils/leaflet-config';
 import { HistoricalAttack, CountryStats, calculateCountryStatistics } from '../utils/countryUtils';
@@ -9,10 +10,36 @@ interface HistoricalMapProps {
   selectedCountry?: string | null;
 }
 
+// Map boundaries restrictor component
+const MapBoundariesRestrictor: React.FC = () => {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (!map) return;
+
+    // Set world boundaries to restrict panning
+    const southWest = L.latLng(-60, -180);
+    const northEast = L.latLng(85, 180);
+    const bounds = L.latLngBounds(southWest, northEast);
+    
+    map.setMaxBounds(bounds);
+    map.on('drag', () => {
+      map.panInsideBounds(bounds, { animate: false });
+    });
+    
+    return () => {
+      map.off('drag');
+    };
+  }, [map]);
+  
+  return null;
+};
+
 const HistoricalMap: React.FC<HistoricalMapProps> = ({ incidents, selectedCountry }) => {
   const [countryData, setCountryData] = useState<any>(null);
   const [countriesStats, setCountriesStats] = useState<Record<string, CountryStats>>({});
   const [maxAttacks, setMaxAttacks] = useState(0);
+  const [medianAttacks, setMedianAttacks] = useState(0);
 
   // Fetch GeoJSON country boundaries
   useEffect(() => {
@@ -29,13 +56,26 @@ const HistoricalMap: React.FC<HistoricalMapProps> = ({ incidents, selectedCountr
 
     const stats = calculateCountryStatistics(incidents);
     
-    // Find the country with the most attacks
+    // Find the country with the most attacks and calculate median for better scaling
     let highestAttackCount = 0;
+    const attackCounts: number[] = [];
+    
     Object.values(stats).forEach(stat => {
+      attackCounts.push(stat.attackCount);
       if (stat.attackCount > highestAttackCount) {
         highestAttackCount = stat.attackCount;
       }
     });
+    
+    // Calculate median if we have data
+    if (attackCounts.length > 0) {
+      attackCounts.sort((a, b) => a - b);
+      const mid = Math.floor(attackCounts.length / 2);
+      const medianValue = attackCounts.length % 2 === 0 
+        ? (attackCounts[mid - 1] + attackCounts[mid]) / 2 
+        : attackCounts[mid];
+      setMedianAttacks(medianValue);
+    }
 
     setCountriesStats(stats);
     setMaxAttacks(highestAttackCount);
@@ -59,10 +99,10 @@ const HistoricalMap: React.FC<HistoricalMapProps> = ({ incidents, selectedCountr
       };
     }
     
-    // Default style (no attacks)
+    // Default style (no attacks) - light gray instead of green
     if (!stats) {
       return {
-        fillColor: '#22c55e', // green
+        fillColor: '#e5e7eb', // light gray for countries with no data
         fillOpacity: 0.4,
         weight: 1,
         color: '#666',
@@ -70,22 +110,21 @@ const HistoricalMap: React.FC<HistoricalMapProps> = ({ incidents, selectedCountr
       };
     }
 
-    // Calculate color based on attack count relative to max
-    const ratio = stats.attackCount / maxAttacks;
-    
-    // Color scale from green (0 attacks) to red (max attacks)
-    const getColor = (ratio: number) => {
-      if (ratio === 0) return '#22c55e'; // green
-      if (ratio < 0.1) return '#84cc16'; // lime green
-      if (ratio < 0.25) return '#eab308'; // yellow
-      if (ratio < 0.5) return '#f97316'; // orange
-      if (ratio < 0.75) return '#ef4444'; // red
-      return '#b91c1c'; // dark red
+    // Improved color scaling for better differentiation
+    const getColor = (attackCount: number) => {
+      if (attackCount === 0) return '#e5e7eb'; // light gray for zero attacks
+      if (attackCount === 1) return '#dcfce7'; // very light green - exactly 1 attack
+      if (attackCount <= 3) return '#86efac'; // light green - few attacks (2-3)
+      if (attackCount <= 10) return '#fef08a'; // light yellow - low attacks (4-10)
+      if (attackCount <= 25) return '#fdba74'; // light orange - moderate (11-25)
+      if (attackCount <= 50) return '#f97316'; // orange - significant (26-50)
+      if (attackCount <= 100) return '#ef4444'; // red - high (51-100)
+      return '#b91c1c'; // dark red - very high (100+)
     };
 
     return {
-      fillColor: getColor(ratio),
-      fillOpacity: 0.6,
+      fillColor: getColor(stats.attackCount),
+      fillOpacity: 0.7,
       weight: 1,
       color: '#666',
       opacity: 0.7
@@ -127,7 +166,9 @@ const HistoricalMap: React.FC<HistoricalMapProps> = ({ incidents, selectedCountr
         scrollWheelZoom={true}
         minZoom={1.5}
         maxZoom={6}
+        maxBoundsViscosity={1.0}
       >
+        <MapBoundariesRestrictor />
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -141,28 +182,40 @@ const HistoricalMap: React.FC<HistoricalMapProps> = ({ incidents, selectedCountr
         )}
       </MapContainer>
 
-      {/* Legend */}
+      {/* Updated Legend */}
       <div className="absolute bottom-4 right-4 bg-white p-2 rounded shadow-md text-sm">
         <div className="font-bold mb-1">Attack Intensity</div>
         <div className="flex items-center mb-1">
           <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#b91c1c'}}></span>
-          <span>Very High</span>
+          <span>Very High (100+)</span>
         </div>
         <div className="flex items-center mb-1">
           <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#ef4444'}}></span>
-          <span>High</span>
+          <span>High (51-100)</span>
         </div>
         <div className="flex items-center mb-1">
           <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#f97316'}}></span>
-          <span>Medium</span>
+          <span>Significant (26-50)</span>
         </div>
         <div className="flex items-center mb-1">
-          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#eab308'}}></span>
-          <span>Low</span>
+          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#fdba74'}}></span>
+          <span>Moderate (11-25)</span>
+        </div>
+        <div className="flex items-center mb-1">
+          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#fef08a'}}></span>
+          <span>Low (4-10)</span>
+        </div>
+        <div className="flex items-center mb-1">
+          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#86efac'}}></span>
+          <span>Few (2-3)</span>
+        </div>
+        <div className="flex items-center mb-1">
+          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#dcfce7'}}></span>
+          <span>Single (1)</span>
         </div>
         <div className="flex items-center">
-          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#22c55e'}}></span>
-          <span>None</span>
+          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#e5e7eb'}}></span>
+          <span>None (0)</span>
         </div>
       </div>
     </div>

@@ -23,12 +23,17 @@ class GTDDataLoader:
             'nperpcap': 'float64'
         }
         
-        # Load with specified dtypes and low_memory=False
-        self.data = pd.read_csv(path, dtype=dtype_dict, low_memory=False)
-        
-        # Clean data after loading
-        self._clean_data()
-        return self.data
+        try:
+            # Load with specified dtypes, header=0 to ensure header row is recognized, and low_memory=False
+            self.data = pd.read_csv(path, dtype=dtype_dict, header=0, low_memory=False)
+            
+            # Clean data after loading
+            self._clean_data()
+            return self.data
+        except Exception as e:
+            print(f"Error loading data: {str(e)}")
+            # Return empty DataFrame if error occurs
+            return pd.DataFrame()
     
     def _clean_data(self):
         """Clean and preprocess GTD data"""
