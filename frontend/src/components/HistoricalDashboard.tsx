@@ -28,13 +28,13 @@ import { ExpandMore, ExpandLess } from '@mui/icons-material';
 Chart.register(...registerables);
 
 const HistoricalDashboard: React.FC = () => {
-  // Generate an array of all years from 1970 to 2021
+  // Generate an array of all years from 1970 to 2021, sorted in descending order
   const availableYears = useMemo(() => {
     const years = [];
     for (let year = 1970; year <= 2021; year++) {
       years.push(year);
     }
-    return years;
+    return years.sort((a, b) => b - a); // Sort in descending order
   }, []);
   
   // Basic state
