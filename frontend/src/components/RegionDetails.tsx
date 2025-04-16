@@ -1,5 +1,4 @@
 import React from 'react';
-import { Bar } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -10,6 +9,7 @@ import {
   Legend
 } from 'chart.js';
 import AttackTypeVisualization from './AttackTypeVisualization';
+import { Prediction } from '../types/predictions';
 
 ChartJS.register(
   CategoryScale,
@@ -22,7 +22,7 @@ ChartJS.register(
 
 interface RegionDetailsProps {
   region: string;
-  predictions: any[];
+  predictions: Prediction[];
   year: number;
 }
 

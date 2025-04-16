@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, GeoJSON, Tooltip, useMap } from 'react-leaflet
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import '../utils/leaflet-config';
-import { HistoricalAttack, CountryStats, calculateCountryStatistics } from '../utils/countryUtils';
+import { HistoricalAttack, CountryStats, calculateCountryStatistics, standardizeCountryName } from '../utils/countryUtils';
 
 interface HistoricalMapProps {
   incidents: HistoricalAttack[];
@@ -36,7 +36,7 @@ const MapBoundariesRestrictor: React.FC = () => {
 };
 
 const HistoricalMap: React.FC<HistoricalMapProps> = ({ incidents, selectedCountry }) => {
-  const [countryData, setCountryData] = useState<any>(null);
+  const [countryData, setCountryData] = useState<GeoJSON.FeatureCollection | null>(null);
   const [countriesStats, setCountriesStats] = useState<Record<string, CountryStats>>({});
   const [maxAttacks, setMaxAttacks] = useState(0);
   const [medianAttacks, setMedianAttacks] = useState(0);
@@ -82,10 +82,11 @@ const HistoricalMap: React.FC<HistoricalMapProps> = ({ incidents, selectedCountr
   }, [incidents]);
 
   // Style function for GeoJSON
-  const getCountryStyle = (feature: any) => {
-    const countryName = feature.properties.name;
+  const getCountryStyle = (feature: any): L.PathOptions => {
+    const countryName = feature.properties?.name;
+    const standardizedCountryName = standardizeCountryName(countryName);
     const stats = Object.values(countriesStats).find(
-      stat => stat.standardizedCountry === countryName
+      stat => stat.standardizedCountry === standardizedCountryName
     );
     
     // Style for selected country
@@ -132,94 +133,54 @@ const HistoricalMap: React.FC<HistoricalMapProps> = ({ incidents, selectedCountr
   };
 
   // Tooltip content for each country
-  const onEachFeature = (feature: any, layer: any) => {
-    const countryName = feature.properties.name;
+  const onEachFeature = (feature: any, layer: L.Layer): void => {
+    const countryName = feature.properties?.name;
+    const standardizedCountryName = standardizeCountryName(countryName);
+    
     const stats = Object.values(countriesStats).find(
-      stat => stat.standardizedCountry === countryName
+      stat => stat.standardizedCountry === standardizedCountryName
     );
     
     if (stats) {
-      layer.bindTooltip(`
-        <div class="p-2">
-          <strong>${countryName}</strong><br/>
-          Attacks: ${stats.attackCount}<br/>
-          Deaths: ${stats.deaths}<br/>
-          Wounded: ${stats.wounded}<br/>
-        </div>
-      `);
+      layer.bindTooltip(
+        `<div class="p-2">
+  <strong>${countryName}</strong><br/>
+  Attacks: ${stats.attackCount}<br/>
+  Deaths: ${stats.deaths}<br/>
+  Wounded: ${stats.wounded}<br/>
+</div>`
+      );
     } else {
-      layer.bindTooltip(`
-        <div class="p-2">
-          <strong>${countryName}</strong><br/>
-          No recorded attacks
-        </div>
-      `);
+      layer.bindTooltip(
+        `<div class="p-2">
+  <strong>${countryName}</strong><br/>
+  No recorded attacks
+</div>`
+      );
     }
   };
 
   return (
-    <div className="relative w-full h-[500px] rounded-lg overflow-hidden">
-      <MapContainer 
-        center={[20, 0]} 
-        zoom={2} 
-        style={{ height: '100%', width: '100%' }}
-        scrollWheelZoom={true}
-        minZoom={1.5}
-        maxZoom={6}
-        maxBoundsViscosity={1.0}
-      >
-        <MapBoundariesRestrictor />
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    <MapContainer
+      center={[0, 0]}
+      zoom={2}
+      style={{ width: '100%', height: '300px' }}
+      maxBounds={[[90, -180], [-90, 180]]}
+    >
+      <TileLayer
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      />
+      {countryData && (
+        <GeoJSON
+          data={countryData}
+          style={getCountryStyle}
+          onEachFeature={onEachFeature}
         />
-        {countryData && (
-          <GeoJSON 
-            data={countryData} 
-            style={getCountryStyle}
-            onEachFeature={onEachFeature}
-          />
-        )}
-      </MapContainer>
-
-      {/* Updated Legend */}
-      <div className="absolute bottom-4 right-4 bg-white p-2 rounded shadow-md text-sm">
-        <div className="font-bold mb-1">Attack Intensity</div>
-        <div className="flex items-center mb-1">
-          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#b91c1c'}}></span>
-          <span>Very High (100+)</span>
-        </div>
-        <div className="flex items-center mb-1">
-          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#ef4444'}}></span>
-          <span>High (51-100)</span>
-        </div>
-        <div className="flex items-center mb-1">
-          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#f97316'}}></span>
-          <span>Significant (26-50)</span>
-        </div>
-        <div className="flex items-center mb-1">
-          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#fdba74'}}></span>
-          <span>Moderate (11-25)</span>
-        </div>
-        <div className="flex items-center mb-1">
-          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#fef08a'}}></span>
-          <span>Low (4-10)</span>
-        </div>
-        <div className="flex items-center mb-1">
-          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#86efac'}}></span>
-          <span>Few (2-3)</span>
-        </div>
-        <div className="flex items-center mb-1">
-          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#dcfce7'}}></span>
-          <span>Single (1)</span>
-        </div>
-        <div className="flex items-center">
-          <span className="inline-block w-3 h-3 mr-1" style={{backgroundColor: '#e5e7eb'}}></span>
-          <span>None (0)</span>
-        </div>
-      </div>
-    </div>
+      )}
+      <MapBoundariesRestrictor />
+    </MapContainer>
   );
 };
 
-export default HistoricalMap; 
+export default HistoricalMap;

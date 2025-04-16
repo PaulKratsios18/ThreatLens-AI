@@ -1,10 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, GeoJSON, Tooltip, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import '../utils/leaflet-config';
-import { countryToRegionMapping, standardizeCountryName, getGeoJSONCountryName } from '../utils/countryUtils';
-import { Prediction } from '../types/predictions';
+
+// Define types for predictions
+interface Prediction {
+  country: string;
+  region_name: string;
+  year: number;
+  expected_attacks: number;
+  gti_score?: number;
+  risk_level: string;
+  attack_types?: Record<string, number>;
+  confidence_score: number;
+}
 
 // Map boundaries restrictor component
 const MapBoundariesRestrictor: React.FC = () => {
@@ -31,95 +41,14 @@ const MapBoundariesRestrictor: React.FC = () => {
   return null;
 };
 
-// Country coordinates for better placement on the map
-const getCountryCoordinates = (country: string): [number, number] => {
-  const coordinates: { [key: string]: [number, number] } = {
-    // Middle East & North Africa
-    'Iraq': [33.2232, 43.6793],
-    'Syria': [34.8021, 38.9968],
-    'Iran': [32.4279, 53.6880],
-    'Egypt': [26.8206, 30.8025],
-    'Libya': [26.3351, 17.2283],
-    'Yemen': [15.5527, 48.5164],
-    'Israel': [31.0461, 34.8516],
-    
-    // Sub-Saharan Africa
-    'Burkina Faso': [12.2383, -1.5616],
-    'Mali': [17.5707, -3.9962],
-    'Niger': [17.6078, 8.0817],
-    'Nigeria': [9.0820, 8.6753],
-    'Somalia': [5.1521, 46.1996],
-    'Democratic Republic of the Congo': [-4.0383, 21.7587],
-    
-    // South Asia
-    'Afghanistan': [33.9391, 67.7100],
-    'Pakistan': [30.3753, 69.3451],
-    
-    // Western Europe
-    'France': [46.2276, 2.2137],
-    'United Kingdom': [55.3781, -3.4360],
-    'Iceland': [64.9631, -19.0208],
-    
-    // North America
-    'United States': [37.0902, -95.7129],
-    'USA': [37.0902, -95.7129],
-    'Canada': [56.1304, -106.3468],
-    
-    // East Asia
-    'Japan': [36.2048, 138.2529],
-  };
-  
-  return coordinates[country] || [0, 0];
-};
-
-// Fallback to region coordinates
-const getRegionCoordinates = (region: string): [number, number] => {
-  const coordinates: { [key: string]: [number, number] } = {
-    'North America': [40, -100],
-    'South America': [-20, -60],
-    'Central America & Caribbean': [15, -85],
-    'Western Europe': [48, 10],
-    'Eastern Europe': [50, 30],
-    'Middle East & North Africa': [30, 35],
-    'Sub-Saharan Africa': [0, 20],
-    'South Asia': [25, 75],
-    'Central Asia': [40, 70],
-    'East Asia': [35, 115],
-    'Southeast Asia': [10, 110],
-    'Australasia & Oceania': [-25, 135]
-  };
-  return coordinates[region] || [0, 0];
-};
-
 interface PredictionMapProps {
   predictions: Prediction[];
-  selectedYear: number;
   onCountrySelect: (country: string) => void;
-  onRegionSelect?: (region: string) => void;
 }
-
-// Add utility functions
-const getRegionForCountry = (country: string): string => {
-  const standardizedName = standardizeCountryName(country);
-  return countryToRegionMapping[standardizedName] || 'Unknown';
-};
-
-const getRiskLevel = (attackCount: number): string => {
-  if (attackCount > 100) return 'Very High';
-  if (attackCount > 50) return 'High';
-  if (attackCount > 25) return 'Significant';
-  if (attackCount > 10) return 'Moderate';
-  if (attackCount > 3) return 'Low';
-  if (attackCount > 1) return 'Few';
-  if (attackCount === 1) return 'Single';
-  return 'None';
-};
 
 const PredictionMap: React.FC<PredictionMapProps> = ({ 
   predictions, 
-  selectedYear, 
-  onCountrySelect,
-  onRegionSelect 
+  onCountrySelect
 }) => {
   const [countryData, setCountryData] = useState<GeoJSON.FeatureCollection | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
@@ -134,15 +63,9 @@ const PredictionMap: React.FC<PredictionMapProps> = ({
   }, []);
 
   // Style function for GeoJSON
-  const getCountryStyle = (feature: any): L.PathOptions => {
+  const getCountryStyle = (feature: GeoJSON.Feature<GeoJSON.Geometry>): L.PathOptions => {
     const countryName = feature.properties?.name;
-    // Standardize the GeoJSON country name
-    const standardizedName = standardizeCountryName(countryName);
-    
-    // Find prediction using the standardized name
-    const prediction = predictions.find(p => 
-      standardizeCountryName(p.country) === standardizedName
-    );
+    const prediction = predictions.find(p => p.country === countryName);
     
     // Style for selected country
     if (selectedCountry && countryName === selectedCountry) {
@@ -196,40 +119,34 @@ const PredictionMap: React.FC<PredictionMapProps> = ({
   };
 
   // Tooltip content for each country
-  const onEachFeature = (feature: any, layer: L.Layer): void => {
+  const onEachFeature = (feature: GeoJSON.Feature, layer: L.Layer): void => {
     const countryName = feature.properties?.name;
-    // Standardize the GeoJSON country name
-    const standardizedName = standardizeCountryName(countryName);
-    
-    // Find prediction using the standardized name
-    const prediction = predictions.find(p => 
-      standardizeCountryName(p.country) === standardizedName
-    );
+    const prediction = predictions.find(p => p.country === countryName);
     
     if (prediction) {
-      layer.bindTooltip(`
-        <div class="p-2">
+      layer.bindTooltip(
+        `<div class="p-2">
           <strong>${countryName}</strong> (${prediction.region_name})<br/>
           Expected Attacks: ${prediction.expected_attacks}<br/>
           GTI Score: ${typeof prediction.gti_score === 'number' ? prediction.gti_score.toFixed(1) : 'N/A'}<br/>
           Risk Level: ${prediction.risk_level}
-        </div>
-      `);
+        </div>`
+      );
 
       // Add click handler
       layer.on({
         click: () => {
           setSelectedCountry(countryName);
-          onCountrySelect(prediction.country);
+          onCountrySelect(countryName);
         }
       });
     } else {
-      layer.bindTooltip(`
-        <div class="p-2">
+      layer.bindTooltip(
+        `<div class="p-2">
           <strong>${countryName}</strong><br/>
           No prediction data available
-        </div>
-      `);
+        </div>`
+      );
     }
   };
 
@@ -252,13 +169,13 @@ const PredictionMap: React.FC<PredictionMapProps> = ({
         {countryData && (
           <GeoJSON 
             data={countryData} 
-            style={getCountryStyle}
+            style={getCountryStyle as any}
             onEachFeature={onEachFeature}
           />
         )}
       </MapContainer>
       
-      {/* Updated Legend to match HistoricalMap */}
+      {/* Risk Level Legend */}
       <div className="absolute bottom-4 right-4 bg-white p-2 rounded shadow-md text-sm">
         <div className="font-bold mb-1">Risk Level & Expected Attacks</div>
         <div className="flex items-center mb-1">
@@ -298,4 +215,4 @@ const PredictionMap: React.FC<PredictionMapProps> = ({
   );
 };
 
-export default PredictionMap;
+export default PredictionMap; 

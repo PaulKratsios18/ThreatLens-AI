@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict
 from sklearn.cluster import KMeans
+from .socioeconomic_data import SocioeconomicDataLoader
 
 class GTDFeatureEngineer:
     def __init__(self):
@@ -10,6 +11,7 @@ class GTDFeatureEngineer:
             'attacktype1', 'weaptype1', 'targtype1',
             'gname', 'nperps', 'nperpcap'
         ]
+        self.socioeconomic_loader = SocioeconomicDataLoader()
         
     def engineer_features(self, df):
         """Engineer features for attack prediction"""
@@ -41,8 +43,82 @@ class GTDFeatureEngineer:
         
         df.loc[:, 'multiple_targets'] = (df['targtype1'] != df['targtype1'].shift()).astype(int)
         
-        return df
+        # Add socioeconomic features
+        df = self._add_socioeconomic_features(df)
         
+        return df
+    
+    def _add_socioeconomic_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add socioeconomic features to the dataset"""
+        # Load socioeconomic data
+        try:
+            socio_data = self.socioeconomic_loader.load_socioeconomic_data()
+            
+            # Add country-level socioeconomic features
+            for _, row in df.iterrows():
+                country = row['country']
+                year = row['iyear']
+                
+                # Get country data
+                country_data = self.socioeconomic_loader.get_country_data(country, year)
+                
+                # Add features to the row
+                for feature, value in country_data.items():
+                    if feature not in ['country', 'year']:
+                        df.loc[_, f'socio_{feature}'] = value
+            
+            # Add region-level socioeconomic features
+            for _, row in df.iterrows():
+                region = row['region']
+                year = row['iyear']
+                
+                # Get region averages
+                region_data = self.socioeconomic_loader.get_region_averages(region, year)
+                
+                # Add features to the row
+                for feature, value in region_data.items():
+                    if feature not in ['country', 'year']:
+                        df.loc[_, f'region_socio_{feature}'] = value
+            
+            # Calculate socioeconomic risk factors
+            df['socioeconomic_risk'] = self._calculate_socioeconomic_risk(df)
+            
+        except Exception as e:
+            print(f"Error adding socioeconomic features: {e}")
+            # Add placeholder columns with NaN values
+            for feature in ['gdp_per_capita', 'unemployment_rate', 'gini_index', 'population',
+                          'urban_population_percent', 'primary_school_enrollment', 'life_expectancy']:
+                df[f'socio_{feature}'] = np.nan
+                df[f'region_socio_{feature}'] = np.nan
+            df['socioeconomic_risk'] = np.nan
+        
+        return df
+    
+    def _calculate_socioeconomic_risk(self, df: pd.DataFrame) -> pd.Series:
+        """Calculate a composite socioeconomic risk score"""
+        # Define weights for different indicators
+        weights = {
+            'gdp_per_capita': -0.3,  # Negative weight as higher GDP reduces risk
+            'unemployment_rate': 0.4,
+            'gini_index': 0.3,
+            'urban_population_percent': 0.1,
+            'primary_school_enrollment': -0.2,
+            'life_expectancy': -0.1
+        }
+        
+        # Calculate weighted sum
+        risk_score = pd.Series(0, index=df.index)
+        for feature, weight in weights.items():
+            if f'socio_{feature}' in df.columns:
+                # Normalize the feature
+                normalized_feature = (df[f'socio_{feature}'] - df[f'socio_{feature}'].mean()) / df[f'socio_{feature}'].std()
+                risk_score += normalized_feature * weight
+        
+        # Normalize the final risk score to 0-1 range
+        risk_score = (risk_score - risk_score.min()) / (risk_score.max() - risk_score.min())
+        
+        return risk_score
+    
     def _calculate_group_region_activity(self, df):
         """Calculate how active each group is in different regions"""
         group_region_counts = df.groupby(['gname', 'region']).size().unstack(fill_value=0)

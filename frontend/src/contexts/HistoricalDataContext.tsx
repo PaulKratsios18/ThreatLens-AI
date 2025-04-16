@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { HistoricalAttack } from '../utils/countryUtils';
 
 interface HistoricalDataContextType {
@@ -26,6 +26,7 @@ export const HistoricalDataProvider: React.FC<HistoricalDataProviderProps> = ({ 
   const [historicalData, setHistoricalData] = useState<Record<number | 'all', HistoricalAttack[]>>({} as Record<number | 'all', HistoricalAttack[]>);
   const [loadingYears, setLoadingYears] = useState<Record<number | 'all', boolean>>({} as Record<number | 'all', boolean>);
   const [errors, setErrors] = useState<Record<number | 'all', string | null>>({} as Record<number | 'all', string | null>);
+  const [lastFetchTime, setLastFetchTime] = useState<Record<number | 'all', number>>({} as Record<number | 'all', number>);
   
   // Helper function to fetch with timeout
   const fetchWithTimeout = async (url: string, timeout: number = 30000) => {
@@ -46,6 +47,12 @@ export const HistoricalDataProvider: React.FC<HistoricalDataProviderProps> = ({ 
     // Special case for 'all' - will be handled by the HistoricalDashboard component
     if (year === 'all') return;
     
+    if (lastFetchTime[year] && Date.now() - lastFetchTime[year] < 1000) {
+      // Prevent refetching within 1 second
+      return;
+    }
+    setLastFetchTime(prev => ({ ...prev, [year]: Date.now() }));
+    
     // If we already have the data and it's not loading, don't fetch again
     if (historicalData[year] && !loadingYears[year]) {
       return;
@@ -58,7 +65,7 @@ export const HistoricalDataProvider: React.FC<HistoricalDataProviderProps> = ({ 
       console.log(`Fetching data for year ${year}...`);
       
       // Set a longer timeout for years that might have more data
-      const timeoutMs = year === 2001 ? 60000 : 30000; // 60 seconds for 2001, 30 seconds for others
+      const timeoutMs = 120000; // 2 minutes for all requests
       
       // Use our fetchWithTimeout helper
       const response = await fetchWithTimeout(

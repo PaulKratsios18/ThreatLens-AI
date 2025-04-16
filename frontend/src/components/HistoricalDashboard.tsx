@@ -3,7 +3,6 @@ import { Bar, Pie, Line } from 'react-chartjs-2';
 import { Chart, registerables } from 'chart.js';
 import HistoricalMap from './HistoricalMap';
 import AttacksTable from './AttacksTable';
-import { HistoricalAttack } from '../utils/countryUtils';
 import CountrySelector from './CountrySelector';
 import { useHistoricalData } from '../contexts/HistoricalDataContext';
 import { 
@@ -18,10 +17,8 @@ import {
   TextField,
   Chip,
   IconButton,
-  Tooltip,
   Collapse,
-  Button,
-  Divider
+  Button
 } from '@mui/material';
 import { ExpandMore, ExpandLess } from '@mui/icons-material';
 
@@ -57,7 +54,7 @@ const HistoricalDashboard: React.FC = () => {
   
   // Use the cached historical data context
   const { historicalData, loadingYears, errors, fetchDataForYear } = useHistoricalData();
-  
+
   useEffect(() => {
     // Fetch data for the selected year if not already cached
     if (selectedYear === 'all') {
@@ -143,23 +140,23 @@ const HistoricalDashboard: React.FC = () => {
   );
 
   // Handle filter changes
-  const handleFilterChange = (name: keyof typeof filters, value: any) => {
+  const handleFilterChange = (name: keyof typeof filters, value: string | number) => {
     setFilters(prev => ({ ...prev, [name]: value }));
   };
 
   // Calculate statistics for visualizations
   const attacksByRegion = useMemo(() => 
     filteredData.reduce((acc, attack) => {
-      acc[attack.region] = (acc[attack.region] || 0) + 1;
-      return acc;
+    acc[attack.region] = (acc[attack.region] || 0) + 1;
+    return acc;
     }, {} as Record<string, number>),
     [filteredData]
   );
   
   const attacksByType = useMemo(() => 
     filteredData.reduce((acc, attack) => {
-      acc[attack.attack_type] = (acc[attack.attack_type] || 0) + 1;
-      return acc;
+    acc[attack.attack_type] = (acc[attack.attack_type] || 0) + 1;
+    return acc;
     }, {} as Record<string, number>),
     [filteredData]
   );
@@ -276,7 +273,7 @@ const HistoricalDashboard: React.FC = () => {
             </IconButton>
           </div>
         </div>
-
+        
         <Collapse in={showFilters}>
           <Grid container spacing={3}>
             {/* First row of filters */}
@@ -517,7 +514,7 @@ const HistoricalDashboard: React.FC = () => {
           </Paper>
         </div>
       )}
-      
+
       {/* Country Details when a country is selected */}
       {selectedCountry && (
         <Paper elevation={2} className="mb-6 p-4">
