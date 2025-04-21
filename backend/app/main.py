@@ -937,6 +937,11 @@ async def get_model_predictions(start_year: int = 2023, end_year: int = 2025, op
                             "confidence": pred.get("confidence", 0.5)
                         }
                         
+                        # Add benchmark data if available
+                        if "actual_attacks" in pred:
+                            country_prediction["actual_attacks"] = pred.get("actual_attacks")
+                            country_prediction["accuracy"] = pred.get("accuracy")
+                        
                         # Calculate GTI score (0-10 scale) based on expected attacks
                         # Higher attack numbers = higher GTI score
                         expected_attacks = pred.get("expected_attacks", 0)

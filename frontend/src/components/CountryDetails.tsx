@@ -7,9 +7,10 @@ import {
   Grid,
   Box,
   LinearProgress,
-  Tooltip
+  Tooltip,
+  Divider
 } from '@mui/material';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import PredictionFactorsChart from './PredictionFactorsChart';
 
 interface CountryDetailsProps {
@@ -88,6 +89,15 @@ const CountryDetails: React.FC<CountryDetailsProps> = ({ prediction }) => {
         value: count
       }))
     : [];
+    
+  // Check if we have benchmark data for this prediction
+  const hasBenchmarkData = prediction.actual_attacks !== undefined;
+  
+  // If we have benchmark data, prepare data for comparison chart
+  const benchmarkData = hasBenchmarkData ? [
+    { name: 'Predicted', value: Math.round(prediction.expected_attacks) },
+    { name: 'Actual', value: prediction.actual_attacks }
+  ] : [];
 
   return (
     <Card>
@@ -115,11 +125,11 @@ const CountryDetails: React.FC<CountryDetailsProps> = ({ prediction }) => {
           </Grid>
 
           {/* Expected Attacks */}
-          <Grid item xs={12} sm={6}>
+          <Grid item xs={12} sm={hasBenchmarkData ? 4 : 6}>
             <Card variant="outlined">
               <CardContent>
                 <Typography variant="h6">Expected Attacks</Typography>
-                <Typography variant="h4">{prediction.expected_attacks}</Typography>
+                <Typography variant="h4">{Math.round(prediction.expected_attacks)}</Typography>
                 <Typography variant="body2" color="textSecondary">
                   Confidence: {(prediction.confidence_score * 100).toFixed(1)}%
                 </Typography>
@@ -127,9 +137,45 @@ const CountryDetails: React.FC<CountryDetailsProps> = ({ prediction }) => {
             </Card>
           </Grid>
 
+          {/* Actual Attacks (when available) */}
+          {hasBenchmarkData && (
+            <Grid item xs={12} sm={4}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="h6">Actual Attacks</Typography>
+                  <Typography variant="h4">{prediction.actual_attacks}</Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Historical Record
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          )}
+
+          {/* Prediction Accuracy (when available) */}
+          {hasBenchmarkData && (
+            <Grid item xs={12} sm={4}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="h6">Prediction Accuracy</Typography>
+                  <Typography 
+                    variant="h4" 
+                    color={prediction.accuracy && prediction.accuracy > 80 ? 'success.main' : 
+                           prediction.accuracy && prediction.accuracy > 60 ? 'warning.main' : 'error.main'}
+                  >
+                    {prediction.accuracy ? prediction.accuracy.toFixed(1) : '0'}%
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Model Performance
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          )}
+
           {/* GTI Score */}
           {prediction.gti_score && (
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12} sm={hasBenchmarkData ? 4 : 6}>
               <Card variant="outlined">
                 <CardContent>
                   <Typography variant="h6">GTI Score</Typography>
@@ -137,6 +183,29 @@ const CountryDetails: React.FC<CountryDetailsProps> = ({ prediction }) => {
                   <Typography variant="body2" color="textSecondary">
                     Rank: #{prediction.rank}
                   </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          )}
+          
+          {/* Benchmark Comparison Chart */}
+          {hasBenchmarkData && (
+            <Grid item xs={12}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>Prediction vs. Actual</Typography>
+                  <Box sx={{ height: 300 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={benchmarkData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" />
+                        <YAxis />
+                        <RechartsTooltip />
+                        <Legend />
+                        <Bar dataKey="value" name="Attacks" fill="#8884d8" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Box>
                 </CardContent>
               </Card>
             </Grid>

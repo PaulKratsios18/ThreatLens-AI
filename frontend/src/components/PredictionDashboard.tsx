@@ -20,6 +20,8 @@ interface ApiPrediction {
   change_from_previous: number;
   attack_types: Record<string, number>;
   primary_groups: string[];
+  actual_attacks?: number;
+  accuracy?: number;
   socioeconomic_factors?: {
     gdp_per_capita: number;
     unemployment_rate: number;
@@ -89,7 +91,9 @@ const PredictionDashboard: React.FC = () => {
               change_from_previous: pred.change_from_previous,
               attack_types: pred.attack_types,
               primary_groups: pred.primary_groups,
-              socioeconomic_factors: pred.socioeconomic_factors
+              socioeconomic_factors: pred.socioeconomic_factors,
+              actual_attacks: pred.actual_attacks,
+              accuracy: pred.accuracy
             }));
           }
           
@@ -127,7 +131,9 @@ const PredictionDashboard: React.FC = () => {
               change_from_previous: pred.change_from_previous,
               attack_types: pred.attack_types,
               primary_groups: pred.primary_groups,
-              socioeconomic_factors: pred.socioeconomic_factors
+              socioeconomic_factors: pred.socioeconomic_factors,
+              actual_attacks: pred.actual_attacks,
+              accuracy: pred.accuracy
             }));
             setPredictions(staticTransformedPredictions);
             setError("Using fallback data: " + (error instanceof Error ? error.message : 'Failed to load model predictions'));

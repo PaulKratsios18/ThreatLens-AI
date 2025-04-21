@@ -21,6 +21,8 @@ export interface Prediction {
   attack_types: Record<string, number>;
   primary_groups?: string[];
   socioeconomic_factors?: SocioeconomicFactors;
+  actual_attacks?: number;
+  accuracy?: number;
 }
 
 export interface PredictionMapProps {
