@@ -81,10 +81,13 @@ const CountryDetails: React.FC<CountryDetailsProps> = ({ prediction }) => {
     }
   ];
 
-  const attackTypeData = Object.entries(prediction.attack_types).map(([type, count]) => ({
-    name: type,
-    value: count
-  }));
+  // Make sure attack_types exists before trying to use Object.entries
+  const attackTypeData = prediction.attack_types 
+    ? Object.entries(prediction.attack_types).map(([type, count]) => ({
+        name: type,
+        value: count
+      }))
+    : [];
 
   return (
     <Card>
@@ -148,24 +151,26 @@ const CountryDetails: React.FC<CountryDetailsProps> = ({ prediction }) => {
           </Grid>
 
           {/* Attack Types Chart */}
-          <Grid item xs={12}>
-            <Card variant="outlined">
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Attack Types Distribution</Typography>
-                <Box sx={{ height: 300 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={attackTypeData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <RechartsTooltip />
-                      <Bar dataKey="value" fill="#8884d8" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
+          {attackTypeData.length > 0 && (
+            <Grid item xs={12}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>Attack Types Distribution</Typography>
+                  <Box sx={{ height: 300 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={attackTypeData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" />
+                        <YAxis />
+                        <RechartsTooltip />
+                        <Bar dataKey="value" fill="#8884d8" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          )}
 
           {/* Socioeconomic Factors */}
           {prediction.socioeconomic_factors && (

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react';
 import { HistoricalAttack } from '../utils/countryUtils';
 
 interface HistoricalDataContextType {
@@ -6,6 +6,8 @@ interface HistoricalDataContextType {
   loadingYears: Record<number | 'all', boolean>;
   errors: Record<number | 'all', string | null>;
   fetchDataForYear: (year: number | 'all') => Promise<void>;
+  hasDataForYear: (year: number | 'all') => boolean;
+  hasRealError: (year: number | 'all') => boolean;
 }
 
 const HistoricalDataContext = createContext<HistoricalDataContextType | undefined>(undefined);
@@ -28,131 +30,224 @@ export const HistoricalDataProvider: React.FC<HistoricalDataProviderProps> = ({ 
   const [errors, setErrors] = useState<Record<number | 'all', string | null>>({} as Record<number | 'all', string | null>);
   const [lastFetchTime, setLastFetchTime] = useState<Record<number | 'all', number>>({} as Record<number | 'all', number>);
   
-  // Helper function to fetch with timeout
-  const fetchWithTimeout = async (url: string, timeout: number = 30000) => {
+  // Helper function to handle API calls with timeout
+  const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 60000) => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const id = setTimeout(() => controller.abort(), timeout);
     
     try {
-      const response = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeoutId);
-      return response;
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      clearTimeout(id);
+      
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+      
+      return await response.json();
     } catch (error) {
-      clearTimeout(timeoutId);
+      clearTimeout(id);
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error('Request timeout');
+      }
       throw error;
     }
   };
 
-  const fetchDataForYear = async (year: number | 'all') => {
-    // Special case for 'all' - will be handled by the HistoricalDashboard component
-    if (year === 'all') return;
+  const fetchDataForYear = useCallback(async (year: number | 'all') => {
+    // If already loading or we have the data and it was fetched in the last 5 minutes, skip
+    const cacheTimeout = 5 * 60 * 1000; // 5 minutes
+    const now = Date.now();
+    const hasRecentData = lastFetchTime[year] && (now - lastFetchTime[year]) < cacheTimeout;
     
-    if (lastFetchTime[year] && Date.now() - lastFetchTime[year] < 1000) {
-      // Prevent refetching within 1 second
+    if (loadingYears[year]) {
+      console.log(`Already loading data for year ${year}`);
       return;
     }
-    setLastFetchTime(prev => ({ ...prev, [year]: Date.now() }));
     
-    // If we already have the data and it's not loading, don't fetch again
-    if (historicalData[year] && !loadingYears[year]) {
+    if (historicalData[year] && historicalData[year].length > 0 && hasRecentData) {
+      console.log(`Using recently cached data for year ${year}`);
       return;
     }
 
+    // Set loading state for this year
+    setLoadingYears(prev => ({ ...prev, [year]: true }));
+    
+    // Clear any previous errors for this year
+    if (errors[year]) {
+      setErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[year];
+        return newErrors;
+      });
+    }
+
     try {
-      // Set loading state for this year
-      setLoadingYears(prev => ({ ...prev, [year]: true }));
-      
       console.log(`Fetching data for year ${year}...`);
+      const startTime = Date.now();
       
-      // Set a longer timeout for years that might have more data
-      const timeoutMs = 120000; // 2 minutes for all requests
+      // Set a specific timeout for year 2001 (known to be problematic)
+      const timeout = year === 2001 ? 90000 : 60000; // 90 seconds for 2001, 60s for others
       
-      // Use our fetchWithTimeout helper
-      const response = await fetchWithTimeout(
-        `http://localhost:8000/historical-data?year=${year}`,
-        timeoutMs
-      );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      // Check if there was an error reported by the API
-      if (data.error) {
-        console.warn(`API reported an error for year ${year}: ${data.error}`);
-        setErrors(prev => ({ 
-          ...prev, 
-          [year]: `Server error: ${data.error}`
-        }));
+      let data;
+      if (year === 'all') {
+        // This would fetch all years (implementation depends on your API)
+        data = await fetchWithTimeout('http://localhost:8000/historical-data-all', {}, timeout);
       } else {
-        // Clear any errors
-        setErrors(prev => ({ ...prev, [year]: null }));
+        data = await fetchWithTimeout(`http://localhost:8000/historical-data?year=${year}`, {}, timeout);
       }
       
-      // Store the fetched data by year (even if there was an error, store any incidents that were returned)
-      if (data.incidents && Array.isArray(data.incidents)) {
-        setHistoricalData(prev => ({
-          ...prev,
-          [year]: data.incidents
-        }));
-        console.log(`Loaded ${data.incidents.length} incidents for year ${year}`);
-      }
-    } catch (error) {
-      console.error(`Error fetching historical data for year ${year}:`, error);
+      const endTime = Date.now();
+      console.log(`Data for year ${year} loaded in ${(endTime - startTime) / 1000}s`);
       
-      // Handle different error types
-      let errorMessage = 'Failed to load historical data';
-      
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        errorMessage = `Request timed out when loading data for year ${year}. Try a different year.`;
-      } else if (error instanceof Error) {
-        errorMessage = error.message;
-      }
-      
-      setErrors(prev => ({ 
-        ...prev, 
-        [year]: errorMessage
+      // Update last fetch time
+      setLastFetchTime(prev => ({
+        ...prev,
+        [year]: now
       }));
       
-      // If we had a timeout, provide some empty data so the UI can still show something
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        // Create a timeout incident that matches HistoricalAttack type
-        const timeoutIncident: HistoricalAttack = {
-          id: 0, // Use a number for id to match HistoricalAttack type
-          year: year as number,
-          month: 1,
-          day: 1,
-          region: "Error",
-          country: "Data loading timeout",
-          city: "Try a different year",
-          latitude: 0,
-          longitude: 0,
-          attack_type: "Loading Timeout",
-          weapon_type: "Unknown",
-          target_type: "Unknown",
-          num_killed: 0,
-          num_wounded: 0,
-          group_name: "Loading timed out"
-        };
-        
-        setHistoricalData(prev => ({
+      // Handle potential error message in the response
+      if (data.error) {
+        console.warn(`Error in data for year ${year}: ${data.error}`);
+        // We'll still process the incidents that were returned, but also store the error
+        setErrors(prev => ({
           ...prev,
-          [year]: [timeoutIncident]
+          [year]: data.error
         }));
       }
+      
+      // Check if we have incidents
+      if (!data.incidents || data.incidents.length === 0) {
+        console.warn(`No incidents found for year ${year}`);
+        // Generate mock data if we hit a timeout or other issue
+        if (year !== 'all' && typeof year === 'number') {
+          const mockData = {
+            incidents: [
+              {
+                id: `mock-${year}-1`,
+                year: year,
+                month: 1,
+                day: 1,
+                region: "No Data Available",
+                country: "No Data Available",
+                city: "No data for this year",
+                latitude: 0,
+                longitude: 0,
+                attack_type: "No Data",
+                weapon_type: "No Data",
+                target_type: "No Data",
+                num_killed: 0,
+                num_wounded: 0,
+                group_name: "No Data Available"
+              }
+            ]
+          };
+          
+          // Update state with mock data
+          setHistoricalData(prev => ({
+            ...prev,
+            [year]: mockData.incidents
+          }));
+          
+          // Set an error for this year
+          setErrors(prev => ({
+            ...prev,
+            [year]: "No data available for this year or timeout occurred"
+          }));
+        }
+      } else {
+        // Process the incidents to ensure we have all required fields
+        const processedIncidents = data.incidents.map((incident: any) => ({
+          id: incident.id || `unknown-${Math.random()}`,
+          year: incident.year || year,
+          month: incident.month || 0,
+          day: incident.day || 0,
+          region: incident.region || "Unknown",
+          country: incident.country || "Unknown",
+          city: incident.city || "",
+          latitude: incident.latitude || 0,
+          longitude: incident.longitude || 0,
+          attack_type: incident.attack_type || "Unknown",
+          weapon_type: incident.weapon_type || "Unknown",
+          target_type: incident.target_type || "Unknown",
+          num_killed: incident.num_killed || 0,
+          num_wounded: incident.num_wounded || 0,
+          group_name: incident.group_name || "Unknown"
+        }));
+      
+        // Update state with the new data
+        setHistoricalData(prev => ({
+          ...prev,
+          [year]: processedIncidents
+        }));
+        
+        console.log(`Processed ${processedIncidents.length} incidents for year ${year}`);
+      }
+    } catch (error) {
+      console.error(`Error fetching data for year ${year}:`, error);
+      
+      // Create some mock data for this error case
+      if (year !== 'all' && typeof year === 'number') {
+        const errorData = {
+          incidents: [
+            {
+              id: `error-${year}-1`,
+              year: year,
+              month: 1,
+              day: 1,
+              region: "Error Loading Data",
+              country: "Error",
+              city: "Please try again",
+              latitude: 0,
+              longitude: 0,
+              attack_type: "Error",
+              weapon_type: "Unknown",
+              target_type: "Unknown",
+              num_killed: 0,
+              num_wounded: 0,
+              group_name: `Error: ${error instanceof Error ? error.message : String(error)}`
+            }
+          ]
+        };
+        
+        // Still set some data so the UI doesn't stay in loading state
+        setHistoricalData(prev => ({
+          ...prev,
+          [year]: errorData.incidents
+        }));
+      }
+      
+      // Set error for this year
+      setErrors(prev => ({
+        ...prev,
+        [year]: error instanceof Error ? error.message : String(error)
+      }));
     } finally {
-      // Clear loading state
+      // Clear loading state for this year
       setLoadingYears(prev => ({ ...prev, [year]: false }));
     }
-  };
+  }, [loadingYears, errors, historicalData, lastFetchTime]);
+
+  // Provide a function to check if data exists for a year
+  const hasDataForYear = useCallback((year: number | 'all'): boolean => {
+    return Boolean(historicalData[year] && historicalData[year].length > 0);
+  }, [historicalData]);
+  
+  // Provide a function to check if a year has a real error (not just empty data)
+  const hasRealError = useCallback((year: number | 'all'): boolean => {
+    // Check if there's an error that's not related to "no data available"
+    return Boolean(errors[year] && !errors[year]?.includes("No data available"));
+  }, [errors]);
 
   const value = {
     historicalData,
     loadingYears,
     errors,
-    fetchDataForYear
+    fetchDataForYear,
+    hasDataForYear,
+    hasRealError
   };
 
   return (

@@ -31,11 +31,11 @@ const StatisticsPanel: React.FC<StatisticsPanelProps> = ({ predictions, selected
   const yearPredictions = predictions.filter(p => p.year === selectedYear);
   
   // Calculate total expected attacks
-  const totalExpectedAttacks = yearPredictions.reduce((sum, pred) => sum + pred.expected_attacks, 0);
+  const totalExpectedAttacks = Math.round(yearPredictions.reduce((sum, pred) => sum + (pred.expected_attacks || 0), 0));
   
   // Calculate average confidence score
-  const averageConfidence = yearPredictions.length > 0 
-    ? yearPredictions.reduce((sum, pred) => sum + pred.confidence_score, 0) / yearPredictions.length
+  const averageConfidence = yearPredictions.length > 0
+    ? yearPredictions.reduce((sum, pred) => sum + (typeof pred.confidence_score === 'number' ? pred.confidence_score : 0), 0) / yearPredictions.length
     : 0;
 
   // Calculate average GTI score

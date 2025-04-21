@@ -58,7 +58,8 @@ class GTDDataLoader:
                 essential_columns = [
                     'eventid', 'iyear', 'imonth', 'iday', 'country_txt', 'region_txt', 
                     'region', 'country', 'provstate', 'city', 'latitude', 'longitude', 
-                    'attacktype1', 'attacktype1_txt', 'nkill', 'nwound', 'gname'
+                    'attacktype1', 'attacktype1_txt', 'nkill', 'nwound', 'gname',
+                    'targtype1_txt', 'weaptype1_txt', 'success', 'suicide', 'multiple'
                 ]
                 print(f"Large file detected, loading only essential columns")
             
@@ -99,50 +100,67 @@ class GTDDataLoader:
         if self.data is None or self.data.empty:
             return
             
-        # Handle date columns first
-        self.data['iyear'] = pd.to_numeric(self.data['iyear'], errors='coerce')
-        self.data['imonth'] = pd.to_numeric(self.data['imonth'], errors='coerce').fillna(1)
-        self.data['iday'] = pd.to_numeric(self.data['iday'], errors='coerce').fillna(1)
+        # Handle date columns first - check if columns exist first
+        if 'iyear' in self.data.columns:
+            self.data['iyear'] = pd.to_numeric(self.data['iyear'], errors='coerce')
+        if 'imonth' in self.data.columns:
+            self.data['imonth'] = pd.to_numeric(self.data['imonth'], errors='coerce').fillna(1)
+        if 'iday' in self.data.columns:
+            self.data['iday'] = pd.to_numeric(self.data['iday'], errors='coerce').fillna(1)
         
-        # Create date string with validation
-        self.data['date'] = pd.to_datetime({
-            'year': self.data['iyear'],
-            'month': self.data['imonth'].clip(1, 12),  # Ensure valid months
-            'day': self.data['iday'].clip(1, 31)  # Ensure valid days
-        }, errors='coerce')
+        # Create date string with validation - only if all required columns exist
+        if all(col in self.data.columns for col in ['iyear', 'imonth', 'iday']):
+            self.data['date'] = pd.to_datetime({
+                'year': self.data['iyear'],
+                'month': self.data['imonth'].clip(1, 12),  # Ensure valid months
+                'day': self.data['iday'].clip(1, 31)  # Ensure valid days
+            }, errors='coerce')
         
-        # Handle missing values
+        # Handle missing values - only for columns that exist
         numeric_cols = ['nkill', 'nwound', 'nperps', 'nperpcap']
-        self.data[numeric_cols] = self.data[numeric_cols].fillna(0)
+        existing_numeric_cols = [col for col in numeric_cols if col in self.data.columns]
+        if existing_numeric_cols:
+            self.data[existing_numeric_cols] = self.data[existing_numeric_cols].fillna(0)
         
         # Clean categorical columns with sensible defaults
         categorical_cols = ['gname', 'country_txt', 'region_txt', 'attacktype1_txt', 
                           'targtype1_txt', 'weaptype1_txt']
-        for col in categorical_cols:
+        existing_cat_cols = [col for col in categorical_cols if col in self.data.columns]
+        for col in existing_cat_cols:
             self.data[col] = self.data[col].fillna('Unknown')
         
         # Clean location data
-        self.data['latitude'] = pd.to_numeric(self.data['latitude'], errors='coerce')
-        self.data['longitude'] = pd.to_numeric(self.data['longitude'], errors='coerce')
+        if 'latitude' in self.data.columns:
+            self.data['latitude'] = pd.to_numeric(self.data['latitude'], errors='coerce')
+        if 'longitude' in self.data.columns:
+            self.data['longitude'] = pd.to_numeric(self.data['longitude'], errors='coerce')
         
         # Convert boolean columns
         bool_cols = ['success', 'suicide', 'multiple']
-        for col in bool_cols:
+        existing_bool_cols = [col for col in bool_cols if col in self.data.columns]
+        for col in existing_bool_cols:
             self.data[col] = self.data[col].fillna(0).astype(int)
         
-        # Remove entries with critical missing data
-        self.data = self.data.dropna(subset=['date', 'country_txt', 'region_txt'])
+        # Remove entries with critical missing data - check for required columns first
+        required_cols = ['country_txt', 'region_txt']
+        if all(col in self.data.columns for col in required_cols):
+            # Include 'date' in required columns only if it exists
+            if 'date' in self.data.columns:
+                required_cols.append('date')
+            self.data = self.data.dropna(subset=required_cols)
         
-        # Standardize numeric values
-        for col in numeric_cols:
+        # Standardize numeric values for existing columns
+        for col in existing_numeric_cols:
             self.data[col] = pd.to_numeric(self.data[col], errors='coerce').fillna(0)
             
-        # Clean property damage values
-        self.data['property'] = self.data['property'].fillna(0).astype(int)
+        # Handle property damage values
+        if 'property' in self.data.columns:
+            self.data['property'] = self.data['property'].fillna(0).astype(int)
         
         # Handle extended text fields
         text_cols = ['summary', 'motive']
-        for col in text_cols:
+        existing_text_cols = [col for col in text_cols if col in self.data.columns]
+        for col in existing_text_cols:
             self.data[col] = self.data[col].fillna('').str.strip()
         
     def get_attacks_by_region(self) -> pd.DataFrame:

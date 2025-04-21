@@ -1,15 +1,55 @@
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent))
-
-import json
 import os
-from datetime import datetime
-import numpy as np
-import pandas as pd
+import sys
+import json
 import random
-from models.neural_network import TerrorismPredictor
-from data_processing.socioeconomic_data import SocioeconomicDataLoader
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from datetime import datetime
+from sklearn.ensemble import RandomForestRegressor
+
+# Add the parent directory to sys.path to import from data_processing
+parent_dir = str(Path(__file__).parent.parent.absolute())
+sys.path.append(parent_dir)
+print(f"Added to Python path: {parent_dir}")
+
+# Import local modules
+from data_processing.data_loader import GTDDataLoader
+
+# Define simplified versions of the classes we need
+class Preprocessor:
+    """Simplified preprocessor for the prediction script."""
+    
+    def process(self, data):
+        """Process the data for prediction."""
+        print("Preprocessing data...")
+        return data
+
+class FeatureEngineer:
+    """Simplified feature engineer for the prediction script."""
+    
+    def engineer_features(self, data):
+        """Engineer features for prediction."""
+        print("Engineering features...")
+        return data
+
+class Predictor:
+    """Simplified predictor for the prediction script."""
+    
+    def __init__(self, model):
+        self.model = model
+    
+    def predict(self, features):
+        """Make a prediction using the model."""
+        return self.model.predict(features)
+
+class MockPredictor:
+    """Mock predictor for the prediction script."""
+    
+    def predict(self, features):
+        """Return a random prediction factor."""
+        print("Using MockPredictor - returning random prediction factor")
+        return random.uniform(0.8, 1.2)
 
 def load_gtd_data(file_path):
     """
@@ -57,339 +97,619 @@ def load_gtd_data(file_path):
         # Return empty DataFrame with expected columns
         return pd.DataFrame(columns=essential_columns)
 
-def generate_predictions():
+def train_and_predict_for_year(training_data, region_data, target_year, force_use_mock=False):
     """
-    Generate comprehensive predictions for:
-    1. Historical years (2000-2020) for backtracking/accuracy testing
-    2. Future years (2021-2025) for forward predictions
+    Train a model on historical data and make a prediction for the target year.
     
-    Ensures that predictions for a year only use data from previous years to prevent data leakage.
-    Accuracy metrics calculated for historical years by comparing against real data.
+    Args:
+        training_data: DataFrame with data prior to target_year
+        region_data: DataFrame with data for the specific region
+        target_year: Year to predict
+        force_use_mock: Whether to use mock predictor
+        
+    Returns:
+        prediction_factor: Factor to multiply historical average by
     """
-    print("Loading model and required components...")
+    if force_use_mock:
+        return random.uniform(0.8, 1.2)
     
-    # Get proper file paths
-    project_root = Path(__file__).parent.parent.parent
-    historical_data_path = project_root / "data" / "globalterrorismdb_0522dist.csv"
-    
-    print(f"Data path: {historical_data_path}")
-    print(f"Data exists: {historical_data_path.exists()}")
-    
-    # Initialize model and required components
     try:
-        print("Attempting to load the trained model...")
-        model = TerrorismPredictor()
-        model.load(str(project_root / "backend" / "models" / "trained_model.keras"))
-        use_real_model = True
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        print("Using a mock predictor for testing.")
-        model = MockPredictor()
-        use_real_model = False
-    
-    # Load historical data directly
-    if historical_data_path.exists():
-        historical_data = load_gtd_data(str(historical_data_path))
-        have_historical_data = len(historical_data) > 0
-        print(f"Successfully loaded {len(historical_data)} historical records. Data columns: {historical_data.columns.tolist()}")
-    else:
-        print(f"Historical data file not found at {historical_data_path}")
-        historical_data = pd.DataFrame()
-        have_historical_data = False
-    
-    # Load socioeconomic data
-    try:
-        print("Loading socioeconomic data...")
-        socio_loader = SocioeconomicDataLoader()
-        socio_data = socio_loader.load_socioeconomic_data()
-        print(f"Successfully loaded socioeconomic data")
-        have_socio_data = True
-    except Exception as e:
-        print(f"Error loading socioeconomic data: {e}")
-        socio_loader = None
-        socio_data = None
-        have_socio_data = False
-    
-    # Years to generate predictions for
-    benchmark_years = list(range(2000, 2021))  # 2000-2020 for benchmarking against real data
-    future_years = list(range(2021, 2026))     # 2021-2025 for future predictions
-    years = benchmark_years + future_years
-    
-    # Regions to generate predictions for
-    regions = [
-        "North America", "South America", "Western Europe", "Eastern Europe",
-        "Middle East", "North Africa", "Sub-Saharan Africa", "Central Asia",
-        "South Asia", "East Asia", "Southeast Asia", "Oceania"
-    ]
-    
-    predictions_by_year = {}
-    
-    print("Generating predictions for historical benchmarking and future years...")
-    
-    for year in years:
-        print(f"Processing year {year}...")
-        region_predictions = []
+        # Preprocess training data
+        preprocessor = Preprocessor()
+        feature_engineer = FeatureEngineer()
         
-        # For each year, we'll only use data from prior years to make predictions
-        cutoff_year = year - 1
+        processed_data = preprocessor.process(training_data)
+        features = feature_engineer.engineer_features(processed_data)
         
-        # Extract features for each region based on historical data up to cutoff_year
-        region_features = {}
-        region_counts = {}
+        # Get numeric features only
+        numeric_features = features.select_dtypes(include=[np.number])
         
-        if have_historical_data and 'iyear' in historical_data.columns:
-            # Filter historical data to only include years up to the cutoff
-            filtered_data = historical_data[historical_data['iyear'] <= cutoff_year]
+        # Skip if no numeric features
+        if len(numeric_features.columns) == 0:
+            print(f"  No numeric features available for year {target_year}")
+            return 1.0
+        
+        # Create a target - more recent incidents have higher risk
+        years_column = numeric_features['iyear']
+        # Normalize years to [0, 1] range for risk assessment
+        years_norm = (years_column - years_column.min()) / (years_column.max() - years_column.min() + 1e-10)
+        # Fill missing values
+        numeric_features = numeric_features.fillna(0)
+        
+        # Train a simple model
+        model = RandomForestRegressor(n_estimators=50, random_state=42)
+        model.fit(numeric_features, years_norm)
+        
+        # Filter features for the specific region
+        region_features = features[features['region_txt'] == region_data['region_txt'].iloc[0]]
+        
+        # Get most recent data as a baseline for prediction
+        recent_years = [y for y in range(target_year - 5, target_year)]
+        region_recent = region_features[region_features['iyear'].isin(recent_years)]
+        
+        if len(region_recent) == 0:
+            region_recent = region_features
+        
+        # Get numeric features for prediction
+        predict_features = region_recent.select_dtypes(include=[np.number])
+        predict_features = predict_features.fillna(0)
+        
+        # Make prediction
+        if len(predict_features) > 0:
+            preds = model.predict(predict_features)
+            # Scale predictions to reasonable factor range (0.7 - 1.3)
+            factors = 0.7 + (preds * 0.6)
+            # Return mean factor
+            factor = float(np.mean(factors))
+            factor = min(1.5, max(0.7, factor))
             
-            # Get historical attack counts by region using only data up to cutoff_year
-            for region in regions:
-                try:
-                    # Filter data for this region
-                    region_data = filtered_data[filtered_data['region_txt'].str.contains(region, case=False, na=False)]
-                    
-                    # Get the counts by year if there's data available
-                    if len(region_data) > 0 and 'iyear' in region_data.columns:
-                        counts_by_year = region_data.groupby('iyear').size()
-                        
-                        # Use this to project future trends
-                        if not counts_by_year.empty:
-                            # Get recent years for trend calculation (up to 5 years of history)
-                            available_years = len(counts_by_year)
-                            lookback = min(5, available_years)
-                            recent_years = counts_by_year.iloc[-lookback:]
-                            
-                            # Calculate average and trend using available years
-                            avg_count = recent_years.mean()
-                            
-                            # Calculate trend if we have multiple years of data
-                            if len(recent_years) > 1:
-                                trend = (recent_years.iloc[-1] - recent_years.iloc[0]) / (len(recent_years) - 1)
-                            else:
-                                trend = 0
-                                
-                            region_counts[region] = {'avg': avg_count, 'trend': trend}
-                            continue
-                except Exception as e:
-                    print(f"Error processing historical data for {region}: {e}")
-                
-                # Default if no data or error
-                region_counts[region] = {'avg': 50, 'trend': 0}
-                
-                # Create feature vector based on historical patterns up to cutoff_year
-                base_features = np.zeros(15)
-                base_features[0] = min(1.0, region_counts[region]['avg'] / 500)  # Normalized attack frequency
-                base_features[1] = 0.5 + (region_counts[region]['trend'] / 20)  # Trend factor
-                
-                # Add socioeconomic factors if available
-                if have_socio_data:
-                    try:
-                        # Get region-level socioeconomic data from the cutoff year
-                        region_socio = socio_loader.get_region_averages(region, cutoff_year)
-                        
-                        # Add relevant socioeconomic indicators to feature vector
-                        if region_socio:
-                            # Normalize GDP per capita (0-1 scale)
-                            gdp_per_capita = region_socio.get('gdp_per_capita', 15000)
-                            base_features[2] = min(1.0, gdp_per_capita / 100000)
-                            
-                            # Unemployment rate (0-1 scale)
-                            unemployment = region_socio.get('unemployment_rate', 8)
-                            base_features[3] = min(1.0, unemployment / 30)
-                            
-                            # Population (0-1 scale)
-                            population = region_socio.get('population', 10000000)
-                            base_features[4] = min(1.0, population / 1000000000)
-                            
-                            # Gini index (already 0-1 scale)
-                            gini = region_socio.get('gini_index', 40)
-                            base_features[5] = min(1.0, gini / 100)
-                    except Exception as e:
-                        print(f"Error incorporating socioeconomic data for {region}: {e}")
-                
-                # Fill remaining features with values based on region characteristics
-                for i in range(6, 15):
-                    # Use deterministic pseudorandom values based on region and year to ensure consistency
-                    random.seed(f"{region}_{cutoff_year}_{i}")
-                    base_features[i] = random.random() * 0.5 + 0.25
-                
-                region_features[region] = base_features
+            print(f"  Model prediction factor for {target_year}: {factor:.4f}")
+            return factor
         else:
-            print("No historical data available with 'iyear' column, using deterministic features")
-            # If no historical data, use deterministic feature vectors
-            for region in regions:
-                random.seed(f"{region}_{year}")
-                
-                # Create feature vector
-                features = np.random.rand(15)
-                
-                # Add some region-specific biases
-                if region in ["Middle East", "North Africa", "Sub-Saharan Africa"]:
-                    # Higher baseline for historically volatile regions
-                    features[0] = 0.7 + random.random() * 0.3  # Higher attack frequency
-                elif region in ["Western Europe", "North America"]:
-                    # Lower baseline for stable regions
-                    features[0] = 0.1 + random.random() * 0.2  # Lower attack frequency
-                
-                region_features[region] = features
-                
-                # Default counts for deterministic predictions
-                region_counts[region] = {
-                    'avg': 50 + random.randint(-20, 50),
-                    'trend': random.uniform(-5, 5)
-                }
-        
-        for region in regions:
-            try:
-                # Get region features
-                features = region_features[region].copy()
-                
-                # Get prediction from model
-                prediction_array = model.predict(np.array([features]))
-                # Extract the scalar value from the prediction array
-                prediction = float(prediction_array[0])
-                
-                # Calculate expected attacks based on prediction and historical context
-                if region in region_counts:
-                    # Base on historical average, adjusted by model prediction
-                    region_stats = region_counts[region]
-                    base_expected = region_stats['avg'] + (region_stats['trend'] * (year - cutoff_year))
-                    expected_multiplier = 0.5 + prediction  # Prediction value influences the multiplier
-                    expected_attacks = int(base_expected * expected_multiplier)
-                else:
-                    # Fallback if no historical data
-                    expected_attacks = int(prediction * 200)  # Scale to a reasonable number
-                
-                # Ensure we have a reasonable positive number
-                expected_attacks = max(1, expected_attacks)
-                
-                # Add some random variation but use a consistent seed for reproducibility
-                random.seed(f"{region}_{year}_variation")
-                variation = random.uniform(0.9, 1.1)
-                expected_attacks = int(expected_attacks * variation)
-                
-                # Calculate confidence score
-                if year in benchmark_years:
-                    # Higher confidence for historical benchmarking as we have more contextual data
-                    base_confidence = 0.85
-                    years_back = 2020 - year
-                    confidence_adjustment = years_back * 0.01  # Slightly lower confidence the further back we go
-                    confidence_score = max(0.6, base_confidence - confidence_adjustment)
-                else:
-                    # Lower confidence for future predictions
-                    confidence_base = 0.9 - ((year - 2021) * 0.1)  # Decreases for future years
-                    confidence_score = confidence_base - (random.random() * 0.2)  # Add some randomness
-                    confidence_score = max(0.5, min(0.95, confidence_score))  # Keep in reasonable range
-                
-                # Generate attack type distribution based on region characteristics and time period
-                random.seed(f"{region}_{year}_attack_types")
-                if region in ["North America", "Western Europe", "East Asia"]:
-                    # More developed regions
-                    if year < 2010:
-                        # Earlier years had different attack patterns
-                        attack_types = {
-                            "Bombing/Explosion": 0.4 + random.random() * 0.1,
-                            "Armed Assault": 0.3 + random.random() * 0.1,
-                            "Facility/Infrastructure Attack": 0.2 + random.random() * 0.1,
-                            "Vehicle Attack": 0.1 + random.random() * 0.05
-                        }
-                    else:
-                        # More recent years with evolving threat landscape
-                        attack_types = {
-                            "Bombing/Explosion": 0.3 + random.random() * 0.1,
-                            "Armed Assault": 0.3 + random.random() * 0.1,
-                            "Facility/Infrastructure Attack": 0.2 + random.random() * 0.1,
-                            "Vehicle Attack": 0.2 + random.random() * 0.1
-                        }
-                elif region in ["Middle East", "North Africa", "Sub-Saharan Africa"]:
-                    # Conflict regions
-                    attack_types = {
-                        "Bombing/Explosion": 0.5 + random.random() * 0.1,
-                        "Armed Assault": 0.3 + random.random() * 0.1,
-                        "Hostage Taking/Kidnapping": 0.1 + random.random() * 0.05,
-                        "Assassination": 0.1 + random.random() * 0.05
-                    }
-                else:
-                    # Mix for other regions
-                    attack_types = {
-                        "Bombing/Explosion": 0.4 + random.random() * 0.1,
-                        "Armed Assault": 0.3 + random.random() * 0.1,
-                        "Hostage Taking/Kidnapping": 0.15 + random.random() * 0.05,
-                        "Facility/Infrastructure Attack": 0.15 + random.random() * 0.05
-                    }
-                
-                # Normalize attack types to sum to 1
-                attack_type_sum = sum(attack_types.values())
-                for attack_type in attack_types:
-                    attack_types[attack_type] /= attack_type_sum
-                
-                # Incorporate socioeconomic factors into the prediction
-                socioeconomic_factors = {}
-                if have_socio_data:
-                    try:
-                        # For predictions, we use socioeconomic data from the cutoff year
-                        region_countries = socio_loader._get_region_countries(region)
-                        
-                        # If this is a region, get average of all countries in the region
-                        if region_countries:
-                            for country in region_countries:
-                                country_socio = socio_loader.get_country_data(country, cutoff_year)
-                                if country_socio:
-                                    for key, value in country_socio.items():
-                                        if key not in ['country', 'year', 'standardized_country']:
-                                            socioeconomic_factors[key] = socioeconomic_factors.get(key, 0) + value
-                            
-                            # Calculate averages
-                            for key in socioeconomic_factors:
-                                socioeconomic_factors[key] /= len(region_countries)
-                    except Exception as e:
-                        print(f"Error getting socioeconomic data for region {region}: {e}")
-                        socioeconomic_factors = {}
-                
-                region_predictions.append({
-                    "region": region,
-                    "expected_attacks": expected_attacks,
-                    "confidence_score": confidence_score,
-                    "attack_types": attack_types,
-                    "socioeconomic_factors": socioeconomic_factors
-                })
-                
-            except Exception as e:
-                print(f"Error generating prediction for {region} in {year}: {e}")
-                # Add a default prediction if there's an error
-                region_predictions.append({
-                    "region": region,
-                    "expected_attacks": random.randint(30, 100),
-                    "confidence_score": 0.5,
-                    "attack_types": {
-                        "Bombing/Explosion": 0.4,
-                        "Armed Assault": 0.3,
-                        "Hostage Taking/Kidnapping": 0.2,
-                        "Facility/Infrastructure Attack": 0.1
-                    }
-                })
-        
-        predictions_by_year[str(year)] = region_predictions
+            print(f"  No prediction features for {target_year}, using default factor")
+            return 1.0
+    except Exception as e:
+        print(f"  Error training model for year {target_year}: {e}")
+        return 1.0
+
+def train_and_predict_for_country(training_data, country_data, target_year, force_use_mock=False):
+    """
+    Train a model on historical country data and make a prediction for the target year.
     
-    # Create output structure
-    output = {
-        'generated_at': datetime.now().isoformat(),
-        'predictions': predictions_by_year
+    Args:
+        training_data: DataFrame with data prior to target_year
+        country_data: DataFrame with data for the specific country
+        target_year: Year to predict
+        force_use_mock: Whether to use mock predictor
+        
+    Returns:
+        prediction_factor: Factor to multiply historical average by
+    """
+    if force_use_mock:
+        return random.uniform(0.8, 1.2)
+    
+    try:
+        # Preprocess training data
+        preprocessor = Preprocessor()
+        feature_engineer = FeatureEngineer()
+        
+        processed_data = preprocessor.process(training_data)
+        features = feature_engineer.engineer_features(processed_data)
+        
+        # Get numeric features only
+        numeric_features = features.select_dtypes(include=[np.number])
+        
+        # Skip if no numeric features
+        if len(numeric_features.columns) == 0:
+            print(f"  No numeric features available for country in year {target_year}")
+            return 1.0
+        
+        # Create a target - more recent incidents have higher risk
+        years_column = numeric_features['iyear']
+        # Normalize years to [0, 1] range for risk assessment
+        years_norm = (years_column - years_column.min()) / (years_column.max() - years_column.min() + 1e-10)
+        # Fill missing values
+        numeric_features = numeric_features.fillna(0)
+        
+        # Train a simple model
+        model = RandomForestRegressor(n_estimators=50, random_state=42)
+        model.fit(numeric_features, years_norm)
+        
+        # Filter features for the specific country
+        country_features = features[features['country_txt'] == country_data['country_txt'].iloc[0]]
+        
+        # Get most recent data as a baseline for prediction
+        recent_years = [y for y in range(target_year - 5, target_year)]
+        country_recent = country_features[country_features['iyear'].isin(recent_years)]
+        
+        if len(country_recent) == 0:
+            country_recent = country_features
+        
+        # Get numeric features for prediction
+        predict_features = country_recent.select_dtypes(include=[np.number])
+        predict_features = predict_features.fillna(0)
+        
+        # Make prediction
+        if len(predict_features) > 0:
+            preds = model.predict(predict_features)
+            # Scale predictions to reasonable factor range (0.7 - 1.3)
+            factors = 0.7 + (preds * 0.6)
+            # Return mean factor
+            factor = float(np.mean(factors))
+            factor = min(1.5, max(0.7, factor))
+            
+            print(f"  Country prediction factor for {target_year}: {factor:.4f}")
+            return factor
+        else:
+            print(f"  No prediction features for country in {target_year}, using default factor")
+            return 1.0
+    except Exception as e:
+        print(f"  Error training model for country in year {target_year}: {e}")
+        return 1.0
+
+def calculate_benchmark_statistics(predictions, output_path):
+    """
+    Calculate benchmark statistics comparing predictions to actual data.
+    
+    Args:
+        predictions: Dictionary of all predictions
+        output_path: Path to save benchmark statistics
+    """
+    print("\nCalculating benchmark statistics...")
+    
+    benchmark = {
+        "overall": {},
+        "by_year": {},
+        "by_region": {}
     }
     
-    # Save predictions to file
-    output_path = Path(__file__).parent.parent.parent / 'data' / 'predictions.json'
-    output_path.parent.mkdir(exist_ok=True)
+    # Collect all prediction-actual pairs
+    all_pairs = []
+    for region in predictions["regions"]:
+        for pred in region["predictions"]:
+            if "actual_attacks" in pred:
+                all_pairs.append({
+                    "year": pred["year"],
+                    "region": region["region"],
+                    "expected": pred["expected_attacks"],
+                    "actual": pred["actual_attacks"],
+                    "accuracy": pred.get("accuracy", 0)
+                })
     
+    # Calculate overall metrics
+    if all_pairs:
+        avg_accuracy = sum(p["accuracy"] for p in all_pairs if "accuracy" in p) / len([p for p in all_pairs if "accuracy" in p])
+        total_expected = sum(p["expected"] for p in all_pairs)
+        total_actual = sum(p["actual"] for p in all_pairs)
+        
+        benchmark["overall"] = {
+            "average_accuracy_percent": round(avg_accuracy, 1),
+            "total_predicted_attacks": round(total_expected),
+            "total_actual_attacks": total_actual,
+            "prediction_ratio": round(total_expected / total_actual, 2) if total_actual > 0 else None
+        }
+    
+    # Calculate metrics by year
+    years = sorted(set(p["year"] for p in all_pairs))
+    for year in years:
+        year_pairs = [p for p in all_pairs if p["year"] == year]
+        if year_pairs:
+            year_accuracy = sum(p["accuracy"] for p in year_pairs if "accuracy" in p) / len([p for p in year_pairs if "accuracy" in p])
+            year_expected = sum(p["expected"] for p in year_pairs)
+            year_actual = sum(p["actual"] for p in year_pairs)
+            
+            benchmark["by_year"][str(year)] = {
+                "average_accuracy_percent": round(year_accuracy, 1),
+                "total_predicted_attacks": round(year_expected),
+                "total_actual_attacks": year_actual,
+                "prediction_ratio": round(year_expected / year_actual, 2) if year_actual > 0 else None
+            }
+    
+    # Calculate metrics by region
+    regions = sorted(set(p["region"] for p in all_pairs))
+    for region in regions:
+        region_pairs = [p for p in all_pairs if p["region"] == region]
+        if region_pairs:
+            region_accuracy = sum(p["accuracy"] for p in region_pairs if "accuracy" in p) / len([p for p in region_pairs if "accuracy" in p])
+            region_expected = sum(p["expected"] for p in region_pairs)
+            region_actual = sum(p["actual"] for p in region_pairs)
+            
+            benchmark["by_region"][region] = {
+                "average_accuracy_percent": round(region_accuracy, 1),
+                "total_predicted_attacks": round(region_expected),
+                "total_actual_attacks": region_actual,
+                "prediction_ratio": round(region_expected / region_actual, 2) if region_actual > 0 else None
+            }
+    
+    # Save benchmark to file
     with open(output_path, 'w') as f:
-        json.dump(output, f, indent=2)
+        json.dump(benchmark, f, indent=2)
+    
+    print(f"Benchmark statistics saved to {output_path}")
+
+def generate_predictions(
+    output_path='../data/predictions.json',
+    force_use_mock=False
+):
+    """
+    Generate predictions for terrorist attacks for years 2000-2025.
+    For each year, train a model using only data preceding that year.
+    Compare predictions with actual data for 2000-2021 for benchmarking.
+    
+    Args:
+        output_path: Path to save the predictions JSON file
+        force_use_mock: Force the use of the mock predictor instead of a real model
+    
+    Returns:
+        Boolean indicating success or failure
+    """
+    print("Generating predictions for years 2000-2025...")
+    
+    # Define global risk thresholds
+    global_thresholds = {
+        "low": 1.0,     # Very Low -> Low threshold
+        "medium": 15.0,  # Low -> Medium threshold
+        "high": 40.0    # Medium -> High threshold
+    }
+    
+    # Path to the GTD data file
+    data_file_path = Path(__file__).parent.parent.parent / 'data' / 'globalterrorismdb_0522dist.csv'
+    
+    # Check if data file exists
+    if not os.path.exists(data_file_path):
+        # Try to find the data file in other common locations
+        potential_paths = [
+            Path(__file__).parent.parent / 'data' / 'globalterrorismdb_0522dist.csv',
+            Path.cwd() / 'data' / 'globalterrorismdb_0522dist.csv',
+            Path(__file__).parent.parent / 'database' / 'data' / 'globalterrorismdb_0522dist.csv'
+        ]
+        
+        for path in potential_paths:
+            if os.path.exists(path):
+                data_file_path = path
+                break
+        else:
+            print(f"Error: Data file not found at {data_file_path} or common alternatives")
+            return False
+    
+    print(f"Using data file at: {data_file_path}")
+    
+    # Try to load risk mappings
+    risk_mappings_path = Path(__file__).parent.parent.parent / 'data' / 'risk_mappings.json'
+    region_risk_multipliers = {}
+    country_risk_mappings = {}
+    
+    try:
+        if os.path.exists(risk_mappings_path):
+            print(f"Loading risk mappings from {risk_mappings_path}")
+            with open(risk_mappings_path, 'r') as f:
+                risk_mappings = json.load(f)
+                region_risk_multipliers = risk_mappings.get('regions', {})
+                country_risk_mappings = risk_mappings.get('countries', {})
+            
+            print(f"Loaded risk mappings with {len(region_risk_multipliers)} regions and {len(country_risk_mappings)} countries")
+        else:
+            print(f"Warning: Risk mappings file not found at {risk_mappings_path}")
+            print("Using default risk thresholds")
+    except Exception as e:
+        print(f"Error loading risk mappings: {e}")
+        print("Using default risk thresholds")
+    
+    # Load all data
+    data_loader = GTDDataLoader()
+    all_data = data_loader.load_data(path=str(data_file_path))
+    
+    if all_data is None or all_data.empty:
+        print("Error: Failed to load data")
+        return False
+    
+    # Check for required columns in the loaded data
+    required_columns = ['iyear', 'country_txt', 'region_txt']
+    missing_columns = [col for col in required_columns if col not in all_data.columns]
+    if missing_columns:
+        print(f"Error: Missing required columns in data: {missing_columns}")
+        return False
+    
+    # Determine the range of years in the data
+    min_year = all_data['iyear'].min()
+    max_year = all_data['iyear'].max()
+    print(f"Data spans years {min_year} to {max_year}")
+    
+    # Define forecast years (2000-2025)
+    forecast_years = list(range(2000, 2026))
+    
+    # Filter out forecast years with insufficient data
+    valid_forecast_years = []
+    for year in forecast_years:
+        # Need at least 3 years of historical data to train a model
+        if year - min_year >= 3:
+            valid_forecast_years.append(year)
+        else:
+            print(f"Skipping year {year} due to insufficient historical data")
+    
+    # Initialize results structure
+    all_predictions = {
+        "generated_at": datetime.now().isoformat(),
+        "model_type": "RandomForestRegressor",
+        "years_predicted": valid_forecast_years,
+        "baseline_years": list(range(min_year, max_year + 1)),
+        "regions": []
+    }
+    
+    # Collect benchmark statistics for years where we have actual data
+    benchmark_years = [year for year in valid_forecast_years if year <= max_year]
+    all_benchmark_results = {
+        "generated_at": datetime.now().isoformat(),
+        "benchmark_years": benchmark_years,
+        "overall_metrics": {},
+        "yearly_metrics": {}
+    }
+    
+    # Get unique regions
+    unique_regions = all_data['region_txt'].unique()
+    
+    for region in unique_regions:
+        print(f"\nProcessing region: {region}")
+        region_data = all_data[all_data['region_txt'] == region]
+        
+        # Get countries in this region
+        countries = region_data['country_txt'].unique()
+        
+        # Initialize region predictions
+        region_predictions = {
+            "region": region,
+            "countries": [],
+            "predictions": []
+        }
+        
+        # Calculate historical average attacks per year for this region
+        yearly_attacks = region_data.groupby('iyear').size()
+        historical_avg = yearly_attacks.mean() if len(yearly_attacks) > 0 else 0
+        region_predictions["historical_avg_attacks"] = float(historical_avg)
+        
+        # Initialize region year predictions dictionary to track aggregated country predictions
+        region_year_predictions = {year: {"expected_attacks": 0, "actual_attacks": 0} for year in valid_forecast_years}
+        
+        # Process countries
+        for country in countries:
+            country_data = region_data[region_data['country_txt'] == country]
+            
+            # Calculate historical average attacks per year for this country
+            country_yearly_attacks = country_data.groupby('iyear').size()
+            country_historical_avg = country_yearly_attacks.mean() if len(country_yearly_attacks) > 0 else 0
+            
+            # Skip countries with negligible historical activity
+            if country_historical_avg < 0.1 and len(countries) > 10:
+                continue
+            
+            # Initialize country predictions
+            country_predictions = {
+                "country": country,
+                "historical_avg_attacks": round(float(country_historical_avg), 1),
+                "predictions": []
+            }
+            
+            # Generate predictions for each year for this country
+            for year in valid_forecast_years:
+                print(f"  Generating prediction for {country} in year {year}")
+                
+                # For each prediction year, use only data from years before it
+                training_data = all_data[all_data['iyear'] < year]
+                
+                # Skip years with insufficient training data
+                if len(training_data) < 100:
+                    print(f"  Insufficient training data for {country} in year {year}, using MockPredictor")
+                    prediction_factor = random.uniform(0.9, 1.1)  # Random factor close to 1
+                else:
+                    # Train model on historical data for this country
+                    prediction_factor = train_and_predict_for_country(training_data, country_data, year, force_use_mock)
+                
+                # Calculate actual attacks for this year if available (for benchmarking)
+                actual_data = country_data[country_data['iyear'] == year]
+                actual_attacks = len(actual_data) if not actual_data.empty else None
+                
+                # Adjust confidence based on distance from present year
+                current_year = datetime.now().year
+                if year <= max_year:
+                    # For historical years with actual data
+                    year_diff = current_year - year
+                    confidence = max(0.7, 0.9 - (year_diff * 0.01))  # Slightly decreasing for older years
+                else:
+                    # Future predictions have decreasing confidence
+                    year_diff = year - max_year
+                    confidence = max(0.5, 0.9 - (year_diff * 0.1))
+                
+                # Calculate expected attacks for country
+                # Use only data up to prediction year for calculating historical average
+                historical_data_for_year = country_data[country_data['iyear'] < year]
+                
+                # Use recent years for average, but only those before the prediction year
+                historical_lookback = min(5, year - min_year)
+                recent_years = [y for y in range(year - historical_lookback, year) if y >= min_year]
+                
+                if recent_years:
+                    recent_data = country_data[country_data['iyear'].isin(recent_years)]
+                    recent_avg = len(recent_data) / len(recent_years) if recent_years else country_historical_avg
+                else:
+                    # If no recent years data is available, use all historical data up to prediction year
+                    if not historical_data_for_year.empty:
+                        yearly_attacks_for_year = historical_data_for_year.groupby('iyear').size()
+                        recent_avg = yearly_attacks_for_year.mean() if len(yearly_attacks_for_year) > 0 else 0
+                    else:
+                        recent_avg = 0
+                
+                country_expected_attacks = recent_avg * prediction_factor
+                
+                # Determine country-specific risk level based on its expected attacks
+                country_risk_multiplier = country_risk_mappings.get(country, 1.0)
+                if isinstance(country_risk_multiplier, (list, tuple, dict, str)):
+                    # Handle case where mapping returned a non-numeric value
+                    country_risk_multiplier = 1.0
+                
+                # Use the global thresholds modified by country-specific multiplier
+                country_low_threshold = global_thresholds["low"] * country_risk_multiplier
+                country_medium_threshold = global_thresholds["medium"] * country_risk_multiplier
+                country_high_threshold = global_thresholds["high"] * country_risk_multiplier
+                
+                if country_expected_attacks > country_high_threshold:
+                    country_risk_level = "High"
+                elif country_expected_attacks > country_medium_threshold:
+                    country_risk_level = "Medium"
+                elif country_expected_attacks > country_low_threshold:
+                    country_risk_level = "Low"
+                else:
+                    country_risk_level = "Very Low"
+                
+                # Create country year prediction
+                country_year_prediction = {
+                    "year": year,
+                    "expected_attacks": round(float(country_expected_attacks), 1),
+                    "confidence": round(float(confidence), 2),
+                    "risk_level": country_risk_level,
+                    "prediction_factor": round(float(prediction_factor), 3)
+                }
+                
+                # Add actual attacks for benchmarking if available
+                if actual_attacks is not None and actual_attacks > 0:
+                    country_year_prediction["actual_attacks"] = actual_attacks
+                    
+                    # Calculate accuracy metrics if actual data is available
+                    country_error = abs(country_expected_attacks - actual_attacks)
+                    country_relative_error = country_error / actual_attacks
+                    country_accuracy = max(0, 1 - country_relative_error)
+                    country_year_prediction["accuracy"] = round(float(country_accuracy * 100), 1)
+                    
+                    # Add to region year totals for actual attacks
+                    region_year_predictions[year]["actual_attacks"] += actual_attacks
+                
+                # Add to region year totals for expected attacks
+                region_year_predictions[year]["expected_attacks"] += country_expected_attacks
+                
+                # Add to country predictions
+                country_predictions["predictions"].append(country_year_prediction)
+            
+            # Add country to region predictions
+            region_predictions["countries"].append(country_predictions)
+        
+        # Now generate region-level predictions based on aggregated country data
+        for year in valid_forecast_years:
+            # Get the aggregated data for this year
+            expected_attacks = region_year_predictions[year]["expected_attacks"]
+            actual_attacks = region_year_predictions[year]["actual_attacks"] if year <= max_year else None
+            
+            # Adjust confidence based on distance from present year
+            current_year = datetime.now().year
+            if year <= max_year:
+                # For historical years with actual data
+                year_diff = current_year - year
+                confidence = max(0.7, 0.9 - (year_diff * 0.01))  # Slightly decreasing for older years
+            else:
+                # Future predictions have decreasing confidence
+                year_diff = year - max_year
+                confidence = max(0.5, 0.9 - (year_diff * 0.1))
+            
+            # Apply region-specific risk multiplier if available
+            risk_multiplier = region_risk_multipliers.get(region, 1.0)
+            
+            # Determine risk level using thresholds
+            low_threshold = global_thresholds["low"] * risk_multiplier
+            medium_threshold = global_thresholds["medium"] * risk_multiplier
+            high_threshold = global_thresholds["high"] * risk_multiplier
+            
+            if expected_attacks > high_threshold:
+                risk_level = "High"
+            elif expected_attacks > medium_threshold:
+                risk_level = "Medium"
+            elif expected_attacks > low_threshold:
+                risk_level = "Low"
+            else:
+                risk_level = "Very Low"
+            
+            # Create year prediction entry
+            year_prediction = {
+                "year": year,
+                "expected_attacks": round(float(expected_attacks), 1),
+                "confidence": round(float(confidence), 2),
+                "risk_level": risk_level
+            }
+            
+            # Add actual attacks for benchmarking if available
+            if actual_attacks is not None and actual_attacks > 0:
+                year_prediction["actual_attacks"] = actual_attacks
+                
+                # Calculate accuracy metrics if actual data is available
+                error = abs(expected_attacks - actual_attacks)
+                relative_error = error / actual_attacks
+                accuracy = max(0, 1 - relative_error)
+                year_prediction["accuracy"] = round(float(accuracy * 100), 1)
+            
+            # Add to region predictions
+            region_predictions["predictions"].append(year_prediction)
+        
+        # Add region to all predictions
+        all_predictions["regions"].append(region_predictions)
+    
+    # Process benchmark metrics
+    for year in benchmark_years:
+        year_benchmark = {
+            "year": year,
+            "total_actual": 0,
+            "total_expected": 0,
+            "accuracy_scores": [],
+            "region_accuracies": {}
+        }
+        
+        for region_data in all_predictions["regions"]:
+            # Find prediction for this year
+            for pred in region_data["predictions"]:
+                if pred["year"] == year and "actual_attacks" in pred:
+                    actual = pred["actual_attacks"]
+                    expected = pred["expected_attacks"]
+                    
+                    year_benchmark["total_actual"] += actual
+                    year_benchmark["total_expected"] += expected
+                    
+                    if "accuracy" in pred:
+                        year_benchmark["accuracy_scores"].append(pred["accuracy"])
+                        year_benchmark["region_accuracies"][region_data["region"]] = pred["accuracy"]
+        
+        # Calculate overall metrics for the year
+        if year_benchmark["accuracy_scores"]:
+            year_benchmark["average_accuracy"] = round(sum(year_benchmark["accuracy_scores"]) / len(year_benchmark["accuracy_scores"]), 1)
+        else:
+            year_benchmark["average_accuracy"] = 0
+            
+        # Calculate error at global level
+        if year_benchmark["total_actual"] > 0:
+            error = abs(year_benchmark["total_expected"] - year_benchmark["total_actual"])
+            relative_error = error / year_benchmark["total_actual"]
+            year_benchmark["global_accuracy"] = round((1 - relative_error) * 100, 1)
+        else:
+            year_benchmark["global_accuracy"] = 0
+            
+        all_benchmark_results["yearly_metrics"][str(year)] = year_benchmark
+    
+    # Calculate overall benchmark metrics across all years
+    if benchmark_years:
+        overall_accuracies = [metrics["global_accuracy"] for _, metrics in all_benchmark_results["yearly_metrics"].items()]
+        all_benchmark_results["overall_metrics"]["average_accuracy"] = round(sum(overall_accuracies) / len(overall_accuracies), 1)
+        
+    # Save predictions to file
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'w') as f:
+        json.dump(all_predictions, f, indent=2)
+    
         print(f"Predictions saved to {output_path}")
     
-    # Calculate and save accuracy metrics for benchmark predictions
-    if have_historical_data and 'iyear' in historical_data.columns:
-        calculate_prediction_accuracy(historical_data, predictions_by_year, benchmark_years)
-    else:
-        print("Skipping accuracy calculation: no historical data with 'iyear' column available")
-
+    # Save benchmark results to file if we have benchmark data
+    if benchmark_years:
+        benchmark_output_path = output_path.replace('.json', '_benchmark.json')
+        with open(benchmark_output_path, 'w') as f:
+            json.dump(all_benchmark_results, f, indent=2)
+        
+        print(f"Benchmark results saved to {benchmark_output_path}")
+    
+    return True
 
 def calculate_prediction_accuracy(historical_data, predictions, years):
     """
@@ -473,21 +793,112 @@ def calculate_prediction_accuracy(historical_data, predictions, years):
         json.dump(accuracy_results, f, indent=2)
         print(f"Accuracy metrics saved to {output_path}")
 
-
-class MockPredictor:
-    """Mock predictor class for testing when the real model isn't available"""
+class RealPredictor:
+    """Adapter class to use the various model types with the prediction script."""
+    
+    def __init__(self, model):
+        self.model = model
+        # Check the model type for better handling
+        self.model_type = type(model).__name__
+        print(f"RealPredictor initialized with {self.model_type} model")
+    
     def predict(self, features):
-        """Return random predictions with proper shape handling"""
-        if isinstance(features, np.ndarray):
-            # Return a scalar value if a single feature set is provided
-            if len(features.shape) == 2 and features.shape[0] == 1:
-                return np.array([random.random()])
-            # Return an array of scalars for multiple feature sets
+        """
+        Make a prediction for the given features.
+        
+        Args:
+            features: DataFrame with features for prediction
+        
+        Returns:
+            Prediction factor for adjusting the historical average
+        """
+        try:
+            print(f"Making prediction with {self.model_type} model on {len(features)} samples")
+            
+            # Ensure we're working with a DataFrame
+            if not isinstance(features, pd.DataFrame):
+                features = pd.DataFrame(features)
+            
+            # Filter out datetime columns and non-numeric columns that would cause issues
+            numeric_features = features.select_dtypes(include=['number'])
+            
+            # Check if we have enough features
+            if len(numeric_features.columns) == 0:
+                print("No numeric features available for prediction")
+                return 1.2
+            
+            # Fill NaN values with 0
+            numeric_features = numeric_features.fillna(0)
+            
+            # If our model already has a predict method, use it directly
+            if hasattr(self.model, 'predict') and callable(getattr(self.model, 'predict')):
+                try:
+                    # Use the model's predict method directly
+                    # For RandomForestClassifier, use predict_proba and get the positive class probability
+                    if self.model_type == 'RandomForestClassifier':
+                        try:
+                            # Try to get probabilities
+                            probs = self.model.predict_proba(numeric_features)
+                            # Use the probability of the positive class (usually the last column)
+                            factor = 0.8 + (np.mean(probs[:, -1]) * 0.7)
+                        except Exception as e:
+                            print(f"Error using predict_proba: {e}")
+                            # Fall back to simple prediction
+                            preds = self.model.predict(numeric_features)
+                            factor = 1.2  # Default factor
+                    else:
+                        # For other model types, use regular predict
+                        factor = self.model.predict(numeric_features)
+                    
+                    # Make sure we return a float, not an array
+                    if hasattr(factor, '__len__') and len(factor) > 0:
+                        factor = float(np.mean(factor))
+                    
+                    # Ensure the result is in a reasonable range
+                    factor = max(0.8, min(1.5, factor))
+                    print(f"Final prediction factor: {factor:.4f}")
+                    return factor
+                except Exception as e:
+                    print(f"Error in direct model prediction: {e}")
+                    return 1.2  # Return a default factor
             else:
-                return np.array([random.random() for _ in range(features.shape[0])])
-        # Fallback
-        return np.array([random.random()])
+                # Should not get here since we already checked for predict method
+                print(f"Model does not have a predict method")
+                return 1.2
+                
+        except Exception as e:
+            print(f"Error in RealPredictor.predict: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1.2  # Return a reasonable default prediction factor
 
+class RFPredictor:
+    def __init__(self, model):
+        self.model = model
+    
+    def predict(self, features):
+        # Convert to dataframe if it's not already
+        if not isinstance(features, pd.DataFrame):
+            features = pd.DataFrame(features)
+        
+        # Get numeric features only
+        numeric_features = features.select_dtypes(include=[np.number])
+        numeric_features = numeric_features.fillna(0)
+        
+        # Predict and scale to our factor range (0.8 - 1.5)
+        try:
+            preds = self.model.predict(numeric_features)
+            # Scale predictions to range 0.8 - 1.5
+            factors = 0.8 + (preds * 0.7)
+            # Return mean factor
+            mean_factor = float(np.mean(factors))
+            mean_factor = min(1.5, max(0.8, mean_factor))
+            print(f"RF model prediction: {mean_factor:.4f}")
+            return mean_factor
+        except Exception as e:
+            print(f"Error in RF prediction: {e}")
+            return 1.2  # Default if prediction fails
 
 if __name__ == "__main__":
-    generate_predictions() 
+    # Generate predictions for years 2000-2025
+    generate_predictions(force_use_mock=False)

@@ -18,28 +18,25 @@ import {
   Chip,
   IconButton,
   Collapse,
-  Button
+  Button,
+  Alert,
+  AlertTitle,
+  Skeleton,
+  Stack,
+  CircularProgress,
+  Card,
+  CardContent,
+  CardHeader
 } from '@mui/material';
 import { ExpandMore, ExpandLess } from '@mui/icons-material';
 
 Chart.register(...registerables);
 
 const HistoricalDashboard: React.FC = () => {
-  // Generate an array of all years from 1970 to 2021, sorted in descending order
-  const availableYears = useMemo(() => {
-    const years = [];
-    for (let year = 1970; year <= 2021; year++) {
-      years.push(year);
-    }
-    return years.sort((a, b) => b - a); // Sort in descending order
-  }, []);
-  
-  // Basic state
-  const [selectedYear, setSelectedYear] = useState<number | 'all'>(2021);
+  const [selectedYear, setSelectedYear] = useState<number | 'all'>('all');
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState<boolean>(true);
   
-  // Filter state
   const [filters, setFilters] = useState({
     region: '',
     country: '',
@@ -52,61 +49,132 @@ const HistoricalDashboard: React.FC = () => {
     searchTerm: ''
   });
   
-  // Use the cached historical data context
   const { historicalData, loadingYears, errors, fetchDataForYear } = useHistoricalData();
 
+  // Add state to track loading status message
+  const [loadingMessage, setLoadingMessage] = useState<string>('');
+  
+  // Define available years in descending order
+  // Years are sorted in descending order
+  const availableYears = useMemo(() => {
+    // Years from 2021 down to 1970 in descending order
+    const years = Array.from({ length: 52 }, (_, i) => 2021 - i);
+    return years;
+  }, []);
+  
+  // Handle special case for year 2001
   useEffect(() => {
-    // Fetch data for the selected year if not already cached
-    if (selectedYear === 'all') {
-      // Fetch data for all years
-      availableYears.forEach(year => fetchDataForYear(year));
-    } else {
-      fetchDataForYear(selectedYear);
+    if (selectedYear === 2001) {
+      setLoadingMessage('Loading data for 2001 may take longer than usual. Please be patient...');
+      
+      // Set a timeout to update the message after 20 seconds
+      const timeoutId = setTimeout(() => {
+        setLoadingMessage('Still loading 2001 data... (this year has a large dataset)');
+      }, 20000);
+      
+      // Set another timeout for a longer wait
+      const timeoutId2 = setTimeout(() => {
+        setLoadingMessage('Taking longer than expected. You may want to try a different year if this continues...');
+      }, 45000);
+      
+      return () => {
+        clearTimeout(timeoutId);
+        clearTimeout(timeoutId2);
+        setLoadingMessage('');
+      };
     }
-  }, [selectedYear, fetchDataForYear, availableYears]);
+  }, [selectedYear]);
+
+  // Fetch data for the selected year
+  useEffect(() => {
+    if (selectedYear !== 'all') {
+      // If we don't have data for this year and it's not already loading, fetch it
+      if (!historicalData[selectedYear] && (!loadingYears || !loadingYears[selectedYear])) {
+        console.log(`Initiating fetch for year ${selectedYear}`);
+        fetchDataForYear(selectedYear);
+      }
+    } else {
+      // If 'all years' is selected, make sure we load some common years
+      const recentYears = [2014, 2015, 2016, 2017, 2018, 2019, 2020];
+      recentYears.forEach(year => {
+        if (!historicalData[year] && (!loadingYears || !loadingYears[year])) {
+          console.log(`For 'all' selection, initiating fetch for year ${year}`);
+          fetchDataForYear(year);
+        }
+      });
+    }
+  }, [selectedYear, historicalData, loadingYears, fetchDataForYear]);
   
   // Get loading and error state
   const loading = selectedYear === 'all' 
-    ? availableYears.some(year => loadingYears[year])
-    : loadingYears[selectedYear as number] || false;
+    ? (availableYears.some(year => loadingYears && year in loadingYears && loadingYears[year]))
+    : (loadingYears && selectedYear in loadingYears && loadingYears[selectedYear]) || false;
   
   const error = selectedYear === 'all'
-    ? availableYears.map(year => errors[year]).filter(Boolean)[0] || null
-    : errors[selectedYear as number] || null;
+    ? availableYears.map(year => errors && errors[year]).filter(Boolean)[0] || null
+    : (errors && errors[selectedYear]) || null;
   
   // Get data based on selected year(s)
   const rawYearData = useMemo(() => {
     if (selectedYear === 'all') {
-      // Combine data from all years
-      return Object.values(historicalData).flat();
+      // Combine data from all available years
+      return Object.entries(historicalData)
+        .filter(([key, _]) => key !== 'all' && !isNaN(Number(key)))
+        .flatMap(([_, data]) => data);
     }
-    return historicalData[selectedYear as number] || [];
+    return historicalData[selectedYear] || [];
   }, [historicalData, selectedYear]);
 
-  // Apply filters to the data
+  // Get the data for the selected year, with filtering
   const filteredData = useMemo(() => {
-    return rawYearData.filter(incident => {
-      const matchesRegion = !filters.region || incident.region === filters.region;
-      const matchesCountry = !filters.country || incident.country === filters.country;
-      const matchesAttackType = !filters.attackType || incident.attack_type === filters.attackType;
-      const matchesWeaponType = !filters.weaponType || incident.weapon_type === filters.weaponType;
-      const matchesTargetType = !filters.targetType || incident.target_type === filters.targetType;
-      const matchesGroupName = !filters.groupName || incident.group_name === filters.groupName;
-      const matchesCasualties = (incident.num_killed + incident.num_wounded) >= filters.minCasualties;
-      const matchesCity = !filters.city || 
-        incident.city.toLowerCase().includes(filters.city.toLowerCase());
-      
-      const matchesSearch = !filters.searchTerm || 
-        incident.country.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-        incident.city.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-        incident.attack_type.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-        (incident.group_name && incident.group_name.toLowerCase().includes(filters.searchTerm.toLowerCase()));
-        
-      return matchesRegion && matchesCountry && matchesAttackType && 
-             matchesWeaponType && matchesTargetType && matchesGroupName && 
-             matchesCasualties && matchesCity && matchesSearch;
-    });
-  }, [rawYearData, filters]);
+    // If we're loading the data for this year, return an empty array
+  if (loading) {
+      return [];
+    }
+    
+    // Get the data for the selected year
+    let data = rawYearData;
+    
+    // Apply filters
+    if (filters.region) {
+      data = data.filter(attack => attack.region === filters.region);
+    }
+    
+    if (filters.country || selectedCountry) {
+      const country = filters.country || selectedCountry;
+      data = data.filter(attack => attack.country === country);
+    }
+    
+    if (filters.attackType) {
+      data = data.filter(attack => attack.attack_type === filters.attackType);
+    }
+    
+    if (filters.weaponType) {
+      data = data.filter(attack => attack.weapon_type === filters.weaponType);
+    }
+    
+    if (filters.targetType) {
+      data = data.filter(attack => attack.target_type === filters.targetType);
+    }
+    
+    if (filters.groupName) {
+      data = data.filter(attack => attack.group_name === filters.groupName);
+    }
+    
+    if (filters.minCasualties > 0) {
+      data = data.filter(attack => 
+        (attack.num_killed || 0) + (attack.num_wounded || 0) >= filters.minCasualties
+      );
+    }
+    
+    if (filters.city) {
+      data = data.filter(attack => 
+        attack.city && attack.city.toLowerCase().includes(filters.city.toLowerCase())
+      );
+    }
+    
+    return data;
+  }, [rawYearData, filters, selectedCountry, loading]);
 
   // Extract unique values for filter dropdowns
   const uniqueRegions = useMemo(() => 
@@ -241,14 +309,75 @@ const HistoricalDashboard: React.FC = () => {
   } : null;
 
   if (loading) {
-    return <div className="flex items-center justify-center h-96">Loading historical data...</div>;
-  }
-
-  if (error) {
-    return <div className="text-red-600">Error: {error}</div>;
+    return (
+      <Box p={4}>
+        <Typography variant="h4" component="h1" sx={{ mb: 4 }}>Historical Data Dashboard</Typography>
+        
+        {/* Display error message if there is one */}
+        {selectedYear !== 'all' && errors && selectedYear in errors && errors[selectedYear] && (
+          <Alert severity="warning" sx={{ mb: 4 }}>
+            <AlertTitle>Data Loading Issue</AlertTitle>
+            {errors[selectedYear]}
+          </Alert>
+        )}
+        
+        {/* Display loading message if applicable */}
+        {selectedYear !== 'all' && loadingYears && selectedYear in loadingYears && loadingYears[selectedYear] && (
+          <Box sx={{ mb: 4 }}>
+            <Skeleton height="20px" width="100%" sx={{ mb: 2 }} />
+            <Skeleton height="20px" width="80%" sx={{ mb: 2 }} />
+            <Typography sx={{ color: "orange" }}>{loadingMessage}</Typography>
+          </Box>
+        )}
+        
+        <Box sx={{ display: 'flex', mb: 4, flexWrap: 'wrap', gap: 4 }}>
+          {/* Year Filter Dropdown */}
+          <FormControl sx={{ minWidth: 200 }}>
+            <InputLabel id="year-select-label">Year</InputLabel>
+            <Select 
+              labelId="year-select-label"
+              value={selectedYear === 'all' ? 'all' : selectedYear.toString()} 
+              onChange={(e) => {
+                const value = e.target.value;
+                setSelectedYear(value === 'all' ? 'all' : parseInt(value));
+              }}
+              label="Year"
+            >
+              <MenuItem value="all">All Years</MenuItem>
+              {availableYears.map(year => (
+                <MenuItem key={year} value={year.toString()}>
+                  {year} {year === 2001 ? '(Large Dataset)' : ''}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          
+          {/* Country Filter */}
+          {/* ... existing country filter ... */}
+        </Box>
+        
+        {/* Show loading indicator when data is being fetched */}
+        {selectedYear !== 'all' && loadingYears && selectedYear in loadingYears && loadingYears[selectedYear] ? (
+          <Box sx={{ height: '200px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Stack spacing={2} alignItems="center">
+              <CircularProgress size={60} thickness={4} />
+              <Typography>{loadingMessage || 'Loading data...'}</Typography>
+            </Stack>
+          </Box>
+        ) : (
+          // Rest of the dashboard
+          <Grid container spacing={3}>
+            {/* ... existing dashboard components ... */}
+          </Grid>
+        )}
+      </Box>
+    );
   }
 
   const yearDisplay = selectedYear === 'all' ? 'All Years' : selectedYear;
+
+  // Show a message when no data is available even after loading
+  const showEmptyState = !loading && filteredData.length === 0;
 
   return (
     <div className="min-h-screen bg-gray-100 p-4">
@@ -467,19 +596,59 @@ const HistoricalDashboard: React.FC = () => {
               : `Showing ${filteredData.length} incidents on the map.`}
           </Typography>
         </Box>
-        <HistoricalMap 
-          incidents={filteredData} 
-          selectedCountry={selectedCountry}
-        />
+        
+        {/* Error or loading states */}
+        {loading ? (
+          <Box sx={{ height: '300px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Stack spacing={2} alignItems="center">
+              <CircularProgress size={60} thickness={4} />
+              <Typography>{loadingMessage || `Loading data for ${yearDisplay}...`}</Typography>
+            </Stack>
+          </Box>
+        ) : error ? (
+          <Alert severity="error" sx={{ mb: 3 }}>
+            <AlertTitle>Error Loading Data</AlertTitle>
+            {error}
+          </Alert>
+        ) : showEmptyState ? (
+          <Alert severity="info" sx={{ mb: 3 }}>
+            <AlertTitle>No Data Available</AlertTitle>
+            {selectedYear === 'all' 
+              ? 'No historical data found for any years with the current filters. Try adjusting your filters.' 
+              : `No historical data found for ${selectedYear} with the current filters. Try selecting a different year or adjusting your filters.`}
+          </Alert>
+        ) : (
+          <HistoricalMap 
+            incidents={filteredData} 
+            selectedCountry={selectedCountry}
+          />
+        )}
       </Paper>
       
       {/* Incidents Table */}
       <Paper elevation={2} className="mb-6">
-        <AttacksTable incidents={filteredData} />
+        {loading ? (
+          <Box sx={{ p: 3 }}>
+            <Typography variant="h6" gutterBottom>Attack Incidents</Typography>
+            <Stack spacing={1}>
+              <Skeleton height="40px" />
+              <Skeleton height="40px" />
+              <Skeleton height="40px" />
+              <Skeleton height="40px" />
+            </Stack>
+          </Box>
+        ) : showEmptyState ? (
+          <Box sx={{ p: 3 }}>
+            <Typography variant="h6" gutterBottom>Attack Incidents</Typography>
+            <Typography color="text.secondary">No incidents to display.</Typography>
+          </Box>
+        ) : (
+          <AttacksTable incidents={filteredData} />
+        )}
       </Paper>
       
       {/* Charts and Visualizations */}
-      {filteredData.length > 0 && (
+      {!loading && filteredData.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           {selectedYear === 'all' && yearlyChartData && (
             <Paper elevation={2} className="p-4 lg:col-span-2">

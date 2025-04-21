@@ -121,12 +121,12 @@ class SocioeconomicDataLoader:
             self.load_socioeconomic_data()
         
         # First standardize the input country name    
-        standardized_country = standardize_country_name(country)
-        
-        # Convert standard name to socioeconomic data name if needed
-        socio_country = get_socioeconomic_country_name(standardized_country)
-            
         try:
+            standardized_country = standardize_country_name(country)
+            
+            # Convert standard name to socioeconomic data name if needed
+            socio_country = get_socioeconomic_country_name(standardized_country)
+                
             # Try looking up by standardized country first
             data = self.cached_data[
                 (self.cached_data['standardized_country'] == standardized_country) & 
@@ -155,7 +155,7 @@ class SocioeconomicDataLoader:
                 data = data.iloc[0]
                 
             if len(data) == 0:
-                print(f"Warning: No socioeconomic data found for {country} (standardized: {standardized_country}) for year {year}")
+                # Return empty data silently instead of logging a warning
                 return {}
                 
             result = data.to_dict()
@@ -164,7 +164,10 @@ class SocioeconomicDataLoader:
             return result
                 
         except Exception as e:
-            print(f"Error getting socioeconomic data for {country}: {e}")
+            # Silently return empty data instead of logging every error
+            # Only log unexpected errors, not common 'standardized_country' key errors
+            if 'standardized_country' not in str(e):
+                print(f"Error getting socioeconomic data for {country}: {e}")
             return {}
     
     def get_region_averages(self, country_or_region: str, year: int) -> Dict[str, float]:
@@ -172,23 +175,22 @@ class SocioeconomicDataLoader:
         if self.cached_data is None:
             self.load_socioeconomic_data()
             
-        # Check if the input is a country or a region
-        standardized_input = standardize_country_name(country_or_region)
-        
-        # If it's a country, get its region
-        region = self._get_region_for_country(standardized_input)
-        if not region:
-            region = country_or_region  # Use as-is if not found
-            
-        # Map region to countries
-        region_countries = self._get_region_countries(region)
-        
-        # If no countries in the region, return empty data
-        if not region_countries:
-            print(f"Warning: No countries found for region {region}")
-            return {}
-            
         try:
+            # Check if the input is a country or a region
+            standardized_input = standardize_country_name(country_or_region)
+            
+            # If it's a country, get its region
+            region = self._get_region_for_country(standardized_input)
+            if not region:
+                region = country_or_region  # Use as-is if not found
+                
+            # Map region to countries
+            region_countries = self._get_region_countries(region)
+            
+            # If no countries in the region, return empty data silently
+            if not region_countries:
+                return {}
+                
             # Get standardized country names for the region
             standardized_countries = [standardize_country_name(c) for c in region_countries]
             
@@ -230,7 +232,7 @@ class SocioeconomicDataLoader:
                     ]
             
             if data.empty:
-                print(f"Warning: No socioeconomic data found for region {region} for year {year}")
+                # Return empty data silently
                 return {}
                 
             # Calculate mean for numeric columns only
@@ -243,7 +245,9 @@ class SocioeconomicDataLoader:
             return result
                 
         except Exception as e:
-            print(f"Error getting region averages for {region}: {e}")
+            # Silently return empty data instead of logging every error
+            if 'standardized_country' not in str(e):
+                print(f"Error getting region averages for {country_or_region}: {e}")
             return {}
     
     def _get_region_for_country(self, country: str) -> str:

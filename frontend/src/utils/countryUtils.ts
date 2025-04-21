@@ -351,7 +351,7 @@ export interface CountryStats {
 }
 
 export interface HistoricalAttack {
-  id: number;
+  id: string | number;
   year: number;
   month: number;
   day: number;
