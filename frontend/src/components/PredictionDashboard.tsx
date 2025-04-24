@@ -137,9 +137,117 @@ const PredictionDashboard: React.FC = () => {
             }));
             setPredictions(staticTransformedPredictions);
             setError("Using fallback data: " + (error instanceof Error ? error.message : 'Failed to load model predictions'));
+          } else {
+            throw new Error('Static predictions also failed');
           }
         } catch (fallbackError) {
           console.error('Error fetching fallback predictions:', fallbackError);
+          
+          // Hardcoded fallback data when all API calls fail
+          const mockYears = [2023, 2024, 2025];
+          setAvailableYears(mockYears);
+          
+          const mockPredictions: {[year: string]: Prediction[]} = {};
+          
+          // Generate mock data for each year
+          mockYears.forEach(year => {
+            mockPredictions[year.toString()] = [
+              {
+                year: year,
+                country: "Iraq",
+                region_name: "Middle East & North Africa",
+                expected_attacks: 180,
+                confidence_score: 0.85,
+                risk_level: "High",
+                gti_score: 8.5,
+                rank: 1,
+                change_from_previous: -5,
+                attack_types: {
+                  "Bombing/Explosion": 60,
+                  "Armed Assault": 40,
+                  "Hostage Taking": 10,
+                  "Other": 15
+                },
+                primary_groups: ["ISIS", "Al-Qaeda", "Local Militants"]
+              },
+              {
+                year: year,
+                country: "Afghanistan",
+                region_name: "South Asia",
+                expected_attacks: 150,
+                confidence_score: 0.78,
+                risk_level: "High",
+                gti_score: 7.8,
+                rank: 2,
+                change_from_previous: -8,
+                attack_types: {
+                  "Bombing/Explosion": 55,
+                  "Armed Assault": 35,
+                  "Assassination": 15,
+                  "Other": 10
+                },
+                primary_groups: ["Taliban", "Local Extremists"]
+              },
+              {
+                year: year,
+                country: "Somalia",
+                region_name: "Sub-Saharan Africa",
+                expected_attacks: 120,
+                confidence_score: 0.72,
+                risk_level: "High",
+                gti_score: 7.2,
+                rank: 3,
+                change_from_previous: 2,
+                attack_types: {
+                  "Bombing/Explosion": 40,
+                  "Armed Assault": 30,
+                  "Assassination": 20,
+                  "Other": 30
+                },
+                primary_groups: ["Al-Shabaab", "Local Militants"]
+              },
+              {
+                year: year,
+                country: "Syria",
+                region_name: "Middle East & North Africa",
+                expected_attacks: 110,
+                confidence_score: 0.68,
+                risk_level: "High",
+                gti_score: 6.8,
+                rank: 4,
+                change_from_previous: -12,
+                attack_types: {
+                  "Bombing/Explosion": 45,
+                  "Armed Assault": 25,
+                  "Hostage Taking": 15,
+                  "Other": 25
+                },
+                primary_groups: ["ISIS", "Al-Nusra", "Local Militants"]
+              },
+              {
+                year: year,
+                country: "Nigeria",
+                region_name: "Sub-Saharan Africa",
+                expected_attacks: 95,
+                confidence_score: 0.65,
+                risk_level: "High",
+                gti_score: 6.5,
+                rank: 5,
+                change_from_previous: -3,
+                attack_types: {
+                  "Bombing/Explosion": 35,
+                  "Armed Assault": 30,
+                  "Hostage Taking": 20,
+                  "Other": 10
+                },
+                primary_groups: ["Boko Haram", "ISWAP", "Local Militants"]
+              }
+            ];
+          });
+          
+          setAllPredictions(mockPredictions);
+          setPredictions(mockPredictions[selectedYear.toString()] || mockPredictions['2023']);
+          setError("Using embedded mock data: Backend API unavailable");
         }
       } finally {
         setLoading(false);
